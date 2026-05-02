@@ -31,6 +31,74 @@ This project utilizes an AI-assisted development model through a system of speci
 * **Developers (Frontend/Backend):** Responsible for writing strict, memory-safe code based on architectural guidelines.
 * **Reviewers (Frontend/Backend):** Code auditors focused on performance, memory leaks, thread blocking, and security vulnerabilities.
 
+## 🔧 Build from Source
+
+### Prerequisites
+
+| Dependency | Version | Purpose |
+|------------|---------|---------|
+| Node.js | ≥18.0 | Frontend runtime |
+| pnpm | ≥8.0 | Package manager |
+| Rust | ≥1.77.2 | Backend runtime |
+| GCC/Clang | Recent | C compiler for Rust crates |
+
+#### System-specific requirements:
+
+**Ubuntu/Debian:**
+```bash
+sudo apt install build-essential pkg-config libdbus-1-dev libgtk-3-dev libwebkit2gtk-4.1-dev
+```
+
+**Fedora/RHEL:**
+```bash
+sudo dnf install dbus-devel pkgconf-pkg-config gtk3-devel webkit2gtk4.1-devel
+```
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/your-username/NetSentinel.git
+cd NetSentinel
+
+# Install frontend dependencies
+pnpm install
+
+# Build the frontend
+pnpm build
+```
+
+### Development
+
+```bash
+# Run in development mode (frontend + Tauri)
+pnpm tauri dev
+
+# Or run frontend only (no desktop window)
+pnpm dev
+```
+
+### Production Build
+
+```bash
+# Build for release
+pnpm tauri build
+
+# Output will be in src-tauri/target/release/bundle/
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GDK_BACKEND` | wayland | Force X11 backend if Wayland issues occur |
+| `RUST_BACKTRACE` | 1 | Enable Rust stack traces for debugging |
+
+**Force X11 on Wayland session:**
+```bash
+GDK_BACKEND=x11 pnpm tauri dev
+```
+
 ## 📄 License
 
 This project is open-source and intended for educational and portfolio demonstration purposes.
