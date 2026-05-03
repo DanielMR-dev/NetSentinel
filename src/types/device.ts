@@ -18,17 +18,16 @@ export interface Device {
   lastSeen: number;
 }
 
-export interface ScanRequest {
-  cidr: string;
-  timeoutMs: number;
-  scanPorts: boolean;
+// Rust sends snake_case, so we need to match
+export interface ScanResponse {
+  scan_id: string;
+  status: string;
 }
 
-export interface ScanResponse {
-  scanId: string;
-  status: 'started' | 'completed' | 'cancelled' | 'error';
+export interface ScanResultsResponse {
   devices: Device[];
-  durationMs: number;
+  scanned_count: number;
+  total_hosts: number;
 }
 
 export interface DeviceFoundEvent {
@@ -36,22 +35,33 @@ export interface DeviceFoundEvent {
   mac: string;
   hostname?: string;
   timestamp: number;
+  ports: Port[];
 }
 
 export interface ScanProgressEvent {
   scanned: number;
   total: number;
-  currentTarget: string;
-  devicesFound: number;
+  current_target: string;
+  devices_found: number;
 }
 
 export interface ScanCompleteEvent {
-  scanId: string;
-  deviceCount: number;
-  durationMs: number;
+  scan_id: string;
+  device_count: number;
+  duration_ms: number;
+  status: string;
 }
 
 export interface ScanError {
   code: string;
   message: string;
 }
+
+export interface ScanLogEvent {
+  level: 'info' | 'warn' | 'error' | 'debug';
+  message: string;
+  timestamp: number;
+  target?: string;
+}
+
+export type LogLevel = ScanLogEvent['level'];
