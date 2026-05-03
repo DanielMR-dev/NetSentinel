@@ -2,6 +2,7 @@ import { useDashboardStore } from './stores/dashboardStore';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { ScanView } from './components/scan/ScanView';
 import { TabNavigation } from './components/dashboard/TabNavigation';
+import { SettingsView } from './components/settings/SettingsView';
 
 export function App() {
   const { activeTab, setActiveTab } = useDashboardStore();
@@ -22,11 +23,3 @@ export function App() {
     </div>
   );
 }
-
-// Placeholder for Settings view
-const SettingsView: React.FC = () => (
-  <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-    <h2 className="text-xl font-semibold text-gray-200 mb-4">Settings</h2>
-    <p className="text-gray-400">Settings panel coming soon...</p>
-  </div>
-);

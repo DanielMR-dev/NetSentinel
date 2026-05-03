@@ -1,6 +1,7 @@
 mod commands;
 mod error;
 mod network;
+mod settings;
 mod state;
 mod types;
 
@@ -10,7 +11,12 @@ pub use commands::{
     get_device_info, get_network_info, start_scan, stop_scan, pause_scan, resume_scan,
     get_scan_results, CommandError, DeviceInfo, NetworkInfo,
 };
+pub use commands::settings::{
+    get_settings_profiles, save_profile, delete_profile, load_settings, save_settings,
+    get_default_settings,
+};
 pub use error::ScanError;
+pub use settings::SettingsProfile;
 pub use state::SharedScanState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -32,6 +38,12 @@ pub fn run() {
             pause_scan,
             resume_scan,
             get_scan_results,
+            get_settings_profiles,
+            save_profile,
+            delete_profile,
+            load_settings,
+            save_settings,
+            get_default_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -18,8 +18,20 @@ pub enum ScanError {
     #[error("Scan not running")]
     NotRunning,
 
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+
     #[error("Invalid port range: {0}")]
     InvalidPort(String),
+
+    #[error("Settings error: {0}")]
+    SettingsError(String),
+
+    #[error("Profile not found: {0}")]
+    ProfileNotFound(String),
+
+    #[error("IO error: {0}")]
+    IoError(String),
 }
 
 impl From<std::io::Error> for ScanError {

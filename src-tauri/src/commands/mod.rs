@@ -1,6 +1,7 @@
 mod device;
-mod network;
-mod scan;
+pub mod network;
+pub mod scan;
+pub mod settings;
 
 use serde::Serialize;
 use thiserror::Error;
@@ -59,3 +60,9 @@ pub use network::get_network_info;
 
 // Re-export scan commands
 pub use scan::{start_scan, stop_scan, pause_scan, resume_scan, get_scan_results};
+
+// Re-export settings commands
+pub use settings::{
+    get_settings_profiles, save_profile, delete_profile, load_settings, save_settings,
+    get_default_settings,
+};
