@@ -1,4 +1,5 @@
 mod device;
+pub mod history;
 pub mod network;
 pub mod platform;
 pub mod scan;
@@ -69,4 +70,9 @@ pub use scan::{start_scan, stop_scan, pause_scan, resume_scan, get_scan_results}
 pub use settings::{
     get_settings_profiles, save_profile, delete_profile, load_settings, save_settings,
     get_default_settings,
+};
+
+// Re-export history commands
+pub use history::{
+    save_scan_history, get_scan_history, delete_scan_history_entry, clear_scan_history,
 };

@@ -17,11 +17,11 @@ export const DeviceDetailPanel: React.FC<DeviceDetailPanelProps> = ({ device }) 
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-gray-700 bg-gray-750 flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-200">Device Details</h2>
+      <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Device Details</h2>
         <button
           onClick={() => selectDevice(null)}
-          className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-gray-200"
+          className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
           aria-label="Close panel"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -44,10 +44,10 @@ export const DeviceDetailPanel: React.FC<DeviceDetailPanelProps> = ({ device }) 
               clsx(
                 'px-2 py-1 rounded text-xs font-medium',
                 device.status === 'online'
-                  ? 'bg-green-900/50 text-green-400'
+                  ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-400'
                   : device.status === 'offline'
-                  ? 'bg-red-900/50 text-red-400'
-                  : 'bg-gray-700 text-gray-400'
+                  ? 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-400'
+                  : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
               )
             )}
           >
@@ -57,26 +57,26 @@ export const DeviceDetailPanel: React.FC<DeviceDetailPanelProps> = ({ device }) 
 
         {/* IP Info */}
         <section>
-          <h3 className="text-xs font-medium text-gray-500 uppercase mb-2">Network</h3>
+          <h3 className="text-xs font-medium text-gray-500 dark:text-gray-500 uppercase mb-2">Network</h3>
           <div className="space-y-2">
             <div className="flex justify-between">
-              <span className="text-gray-400">IP Address</span>
-              <span className="text-gray-200 font-mono">{device.ip}</span>
+              <span className="text-gray-500 dark:text-gray-400">IP Address</span>
+              <span className="text-gray-900 dark:text-gray-200 font-mono">{device.ip}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-400">MAC Address</span>
-              <span className="text-gray-200 font-mono">{device.mac}</span>
+              <span className="text-gray-500 dark:text-gray-400">MAC Address</span>
+              <span className="text-gray-900 dark:text-gray-200 font-mono">{device.mac}</span>
             </div>
             {device.vendor && (
               <div className="flex justify-between">
-                <span className="text-gray-400">Vendor</span>
-                <span className="text-gray-200">{device.vendor}</span>
+                <span className="text-gray-500 dark:text-gray-400">Vendor</span>
+                <span className="text-gray-900 dark:text-gray-200">{device.vendor}</span>
               </div>
             )}
             {device.hostname && (
               <div className="flex justify-between">
-                <span className="text-gray-400">Hostname</span>
-                <span className="text-gray-200">{device.hostname}</span>
+                <span className="text-gray-500 dark:text-gray-400">Hostname</span>
+                <span className="text-gray-900 dark:text-gray-200">{device.hostname}</span>
               </div>
             )}
           </div>
@@ -84,7 +84,7 @@ export const DeviceDetailPanel: React.FC<DeviceDetailPanelProps> = ({ device }) 
 
         {/* Open Ports */}
         <section>
-          <h3 className="text-xs font-medium text-gray-500 uppercase mb-2">
+          <h3 className="text-xs font-medium text-gray-500 dark:text-gray-500 uppercase mb-2">
             Open Ports ({openPorts.length})
           </h3>
           {openPorts.length > 0 ? (
@@ -94,14 +94,14 @@ export const DeviceDetailPanel: React.FC<DeviceDetailPanelProps> = ({ device }) 
               ))}
             </div>
           ) : (
-            <p className="text-sm text-gray-600 italic">No open ports detected</p>
+            <p className="text-sm text-gray-400 dark:text-gray-600 italic">No open ports detected</p>
           )}
         </section>
 
         {/* Filtered Ports */}
         {filteredPorts.length > 0 && (
           <section>
-            <h3 className="text-xs font-medium text-gray-500 uppercase mb-2">
+            <h3 className="text-xs font-medium text-gray-500 dark:text-gray-500 uppercase mb-2">
               Filtered ({filteredPorts.length})
             </h3>
             <div className="space-y-1">
@@ -109,7 +109,7 @@ export const DeviceDetailPanel: React.FC<DeviceDetailPanelProps> = ({ device }) 
                 <PortRow key={port.number} port={port} />
               ))}
               {filteredPorts.length > 10 && (
-                <p className="text-xs text-gray-600">+{filteredPorts.length - 10} more</p>
+                <p className="text-xs text-gray-400 dark:text-gray-600">+{filteredPorts.length - 10} more</p>
               )}
             </div>
           </section>
@@ -117,10 +117,10 @@ export const DeviceDetailPanel: React.FC<DeviceDetailPanelProps> = ({ device }) 
 
         {/* Timestamps */}
         <section>
-          <h3 className="text-xs font-medium text-gray-500 uppercase mb-2">Timestamps</h3>
+          <h3 className="text-xs font-medium text-gray-500 dark:text-gray-500 uppercase mb-2">Timestamps</h3>
           <div className="flex justify-between">
-            <span className="text-gray-400">Last Seen</span>
-            <span className="text-gray-300">
+            <span className="text-gray-500 dark:text-gray-400">Last Seen</span>
+            <span className="text-gray-700 dark:text-gray-300">
               {new Date(device.lastSeen * 1000).toLocaleString()}
             </span>
           </div>
@@ -128,10 +128,10 @@ export const DeviceDetailPanel: React.FC<DeviceDetailPanelProps> = ({ device }) 
 
         {/* Raw Data (expandable in future) */}
         <details className="group">
-          <summary className="text-xs font-medium text-gray-500 uppercase cursor-pointer hover:text-gray-400">
+          <summary className="text-xs font-medium text-gray-500 dark:text-gray-500 uppercase cursor-pointer hover:text-gray-700 dark:hover:text-gray-400">
             Raw Data
           </summary>
-          <pre className="mt-2 p-2 bg-gray-900 rounded text-xs text-gray-400 overflow-x-auto">
+          <pre className="mt-2 p-2 bg-gray-100 dark:bg-gray-900 rounded text-xs text-gray-600 dark:text-gray-400 overflow-x-auto">
             {JSON.stringify(device, null, 2)}
           </pre>
         </details>
@@ -145,19 +145,19 @@ interface PortRowProps {
 }
 
 const PortRow: React.FC<PortRowProps> = ({ port }) => (
-  <div className="flex items-center justify-between py-1 px-2 bg-gray-750 rounded">
+  <div className="flex items-center justify-between py-1 px-2 bg-gray-50 dark:bg-gray-750 rounded">
     <div className="flex items-center gap-2">
-      <span className="text-blue-400 font-mono font-medium">{port.number}</span>
-      <span className="text-gray-500 text-sm">/{port.protocol}</span>
-      {port.service && <span className="text-gray-400 text-sm">({port.service})</span>}
+      <span className="text-blue-600 dark:text-blue-400 font-mono font-medium">{port.number}</span>
+      <span className="text-gray-500 dark:text-gray-500 text-sm">/{port.protocol}</span>
+      {port.service && <span className="text-gray-500 dark:text-gray-400 text-sm">({port.service})</span>}
     </div>
     <span
       className={twMerge(
         clsx(
           'text-xs px-2 py-0.5 rounded',
-          port.state === 'open' && 'bg-green-900/50 text-green-400',
-          port.state === 'closed' && 'bg-red-900/50 text-red-400',
-          port.state === 'filtered' && 'bg-amber-900/50 text-amber-400'
+          port.state === 'open' && 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-400',
+          port.state === 'closed' && 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-400',
+          port.state === 'filtered' && 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-400'
         )
       )}
     >

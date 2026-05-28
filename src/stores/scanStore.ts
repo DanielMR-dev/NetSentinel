@@ -8,6 +8,7 @@ import type {
   ScanProgressEvent,
   ScanResponse,
   ScanLogEvent,
+  ScanHistoryEntry,
 } from '../types/device';
 import type { ScanConfig } from '../types/settings';
 import { useSettingsStore } from './settingsStore';
@@ -72,7 +73,7 @@ interface ScanActions {
   // Internal updaters for events
   _addDevice: (device: Device) => void;
   _updateProgress: (scanned: number, total: number, currentTarget: string) => void;
-  _setScanComplete: (status: ScanStatus) => void;
+  _setScanComplete: (status: ScanStatus, durationMs?: number) => void;
   _addLog: (log: ScanLogEvent) => void;
   _clearLogs: () => void;
 }
@@ -253,8 +254,27 @@ export const useScanStore = create<ScanStore>((set, get) => ({
     set({ scannedCount: scanned, totalHosts: total, currentTarget });
   },
 
-  _setScanComplete: (status: ScanStatus) => {
+  _setScanComplete: (status: ScanStatus, durationMs?: number) => {
     set({ isScanning: false, isPaused: false, scanStatus: status });
+
+    // Auto-save to history if scan completed or was cancelled
+    if (status === 'completed' || status === 'cancelled') {
+      const state = get();
+      if (state.devices.length > 0 || status === 'completed') {
+        const entry: ScanHistoryEntry = {
+          id: crypto.randomUUID(),
+          scanId: state.scanId ?? '',
+          cidr: state.cidr,
+          deviceCount: state.devices.length,
+          durationMs: durationMs ?? 0,
+          status,
+          devices: state.devices,
+          timestamp: Date.now(),
+        };
+        // Fire and forget — don't block UI
+        invoke('save_scan_history', { entry }).catch(console.error);
+      }
+    }
   },
 
   _addLog: (log: ScanLogEvent) => {
@@ -309,7 +329,7 @@ export async function setupScanEventListeners() {
   // Listen for scan complete events
   unlistenScanComplete = await listen<ScanCompleteEvent>('scan_complete', (event) => {
     const status = event.payload.status as ScanStatus;
-    useScanStore.getState()._setScanComplete(status);
+    useScanStore.getState()._setScanComplete(status, event.payload.duration_ms);
   });
 
   // Listen for scan log events

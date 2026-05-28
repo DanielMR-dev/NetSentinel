@@ -38,14 +38,14 @@ export const PrivilegeBanner: React.FC = () => {
       className={twMerge(
         clsx(
           'mx-6 mt-4 px-4 py-3 rounded-lg',
-          'bg-amber-900/30 border border-amber-700/50',
+          'bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700/50',
           'flex items-start gap-3'
         )
       )}
     >
       {/* Warning icon (inline SVG, no external deps) */}
       <svg
-        className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5"
+        className="w-5 h-5 text-amber-500 dark:text-amber-400 flex-shrink-0 mt-0.5"
         fill="none"
         viewBox="0 0 24 24"
         stroke="currentColor"
@@ -61,12 +61,12 @@ export const PrivilegeBanner: React.FC = () => {
 
       {/* Warning text */}
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-amber-200">
+        <p className="text-sm text-amber-800 dark:text-amber-200">
           <span className="font-semibold">Limited Privileges: </span>
           {primaryWarning}
         </p>
         {capabilities.warnings.length > 1 && (
-          <p className="text-xs text-amber-300/70 mt-1">
+          <p className="text-xs text-amber-600 dark:text-amber-300/70 mt-1">
             +{capabilities.warnings.length - 1} additional warning{capabilities.warnings.length > 2 ? 's' : ''}
           </p>
         )}
@@ -80,9 +80,9 @@ export const PrivilegeBanner: React.FC = () => {
         className={twMerge(
           clsx(
             'flex-shrink-0 p-1 rounded-md',
-            'text-amber-400 hover:text-amber-200',
-            'hover:bg-amber-800/30',
-            'focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 focus:ring-offset-gray-900',
+            'text-amber-500 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-200',
+            'hover:bg-amber-100 dark:hover:bg-amber-800/30',
+            'focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 focus:ring-offset-white dark:focus:ring-offset-gray-900',
             'transition-colors duration-150'
           )
         )}

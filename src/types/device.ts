@@ -67,3 +67,14 @@ export interface ScanLogEvent {
 }
 
 export type LogLevel = ScanLogEvent['level'];
+
+export interface ScanHistoryEntry {
+  id: string;
+  scanId: string;
+  cidr: string;
+  deviceCount: number;
+  durationMs: number;
+  status: string;
+  devices: Device[];
+  timestamp: number;
+}

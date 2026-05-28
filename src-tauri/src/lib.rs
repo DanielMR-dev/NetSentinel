@@ -1,5 +1,6 @@
 mod commands;
 mod error;
+mod history;
 mod network;
 mod settings;
 mod state;
@@ -15,7 +16,11 @@ pub use commands::settings::{
     get_settings_profiles, save_profile, delete_profile, load_settings, save_settings,
     get_default_settings,
 };
+pub use commands::history::{
+    save_scan_history, get_scan_history, delete_scan_history_entry, clear_scan_history,
+};
 pub use error::ScanError;
+pub use history::ScanHistoryEntry;
 pub use settings::SettingsProfile;
 pub use state::SharedScanState;
 
@@ -29,6 +34,7 @@ pub fn run() {
                 .level(log::LevelFilter::Info)
                 .build(),
         )
+        .plugin(tauri_plugin_notification::init())
         .manage(shared_state)
         .invoke_handler(tauri::generate_handler![
             get_device_info,
@@ -45,6 +51,10 @@ pub fn run() {
             load_settings,
             save_settings,
             get_default_settings,
+            save_scan_history,
+            get_scan_history,
+            delete_scan_history_entry,
+            clear_scan_history,
         ])
         .run(tauri::generate_context!())
     {

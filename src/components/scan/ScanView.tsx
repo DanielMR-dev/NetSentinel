@@ -35,8 +35,8 @@ export const ScanView: React.FC = () => {
         {/* Results Table */}
         <div className={twMerge(
           clsx(
-            'flex-1 bg-gray-800 rounded-lg overflow-hidden',
-            'border border-gray-700',
+            'flex-1 bg-white dark:bg-gray-800 rounded-lg overflow-hidden',
+            'border border-gray-200 dark:border-gray-700',
             devices.length === 0 && 'hidden'
           )
         )}>
@@ -46,8 +46,8 @@ export const ScanView: React.FC = () => {
         {/* Device Detail Panel */}
         <div className={twMerge(
           clsx(
-            'w-96 bg-gray-800 rounded-lg overflow-hidden',
-            'border border-gray-700',
+            'w-96 bg-white dark:bg-gray-800 rounded-lg overflow-hidden',
+            'border border-gray-200 dark:border-gray-700',
             !selectedDevice && 'hidden'
           )
         )}>
@@ -57,10 +57,10 @@ export const ScanView: React.FC = () => {
 
       {/* Empty state when no devices */}
       {devices.length === 0 && (
-        <div className="flex-1 flex items-center justify-center text-gray-500">
+        <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-500">
           <div className="text-center">
             <svg
-              className="w-16 h-16 mx-auto mb-4 text-gray-600"
+              className="w-16 h-16 mx-auto mb-4 text-gray-300 dark:text-gray-600"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -73,7 +73,7 @@ export const ScanView: React.FC = () => {
               />
             </svg>
             <p className="text-lg">No devices discovered yet</p>
-            <p className="text-sm text-gray-600 mt-1">
+            <p className="text-sm text-gray-400 dark:text-gray-600 mt-1">
               Enter a CIDR range and start a scan to discover devices
             </p>
           </div>

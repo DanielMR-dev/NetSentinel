@@ -68,9 +68,9 @@ const TABS: Tab[] = [
 
 // Error fallback component for individual tabs
 const TabErrorFallback: React.FC<{ tabName: string }> = ({ tabName }) => (
-  <div className="bg-red-900/20 border border-red-800/50 rounded-xl p-6 text-center">
+  <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-xl p-6 text-center">
     <svg
-      className="w-10 h-10 mx-auto mb-3 text-red-400"
+      className="w-10 h-10 mx-auto mb-3 text-red-500 dark:text-red-400"
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
@@ -82,10 +82,10 @@ const TabErrorFallback: React.FC<{ tabName: string }> = ({ tabName }) => (
         d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
       />
     </svg>
-    <h3 className="text-lg font-medium text-red-300 mb-1">
+    <h3 className="text-lg font-medium text-red-700 dark:text-red-300 mb-1">
       {tabName} tab encountered an error
     </h3>
-    <p className="text-sm text-red-200/70">
+    <p className="text-sm text-red-500 dark:text-red-200/70">
       Please try refreshing the page or switching to another tab.
     </p>
   </div>
@@ -166,17 +166,17 @@ export const SettingsView: React.FC = () => {
               'flex items-center gap-3 max-w-sm',
               'animate-slide-in',
               toastType === 'success'
-                ? 'bg-green-900/90 border border-green-700/50 text-green-100'
-                : 'bg-red-900/90 border border-red-700/50 text-red-100'
+                ? 'bg-green-50 dark:bg-green-900/90 border border-green-200 dark:border-green-700/50 text-green-800 dark:text-green-100'
+                : 'bg-red-50 dark:bg-red-900/90 border border-red-200 dark:border-red-700/50 text-red-800 dark:text-red-100'
             )
           )}
         >
           {toastType === 'success' ? (
-            <svg className="w-5 h-5 text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-5 h-5 text-green-500 dark:text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           ) : (
-            <svg className="w-5 h-5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-5 h-5 text-red-500 dark:text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           )}
@@ -207,7 +207,7 @@ export const SettingsView: React.FC = () => {
       )}
 
       {/* Tab Navigation */}
-      <nav aria-label="Settings tabs" className="border-b border-gray-700/50">
+      <nav aria-label="Settings tabs" className="border-b border-gray-200 dark:border-gray-700/50">
         <div className="flex gap-1 -mb-px">
           {TABS.map((tab) => (
             <button
@@ -222,8 +222,8 @@ export const SettingsView: React.FC = () => {
                   'border-b-2 rounded-t-lg transition-all duration-200',
                   'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset',
                   activeTab === tab.id
-                    ? 'border-blue-500 text-blue-400 bg-blue-900/20'
-                    : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-600'
+                    ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
+                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-600'
                 )
               )}
             >

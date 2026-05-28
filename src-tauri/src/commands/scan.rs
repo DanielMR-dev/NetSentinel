@@ -3,6 +3,8 @@ use std::time::Instant;
 
 use tokio::sync::oneshot;
 use tauri::{AppHandle, Emitter, State};
+use tauri_plugin_notification::NotificationExt;
+use tracing::warn;
 
 use crate::error::ScanError;
 use crate::network::{cidr, discovery, host_discovery, icmp, oui};
@@ -11,6 +13,22 @@ use crate::types::{
     DeviceFoundEvent, ScanCompleteEvent, ScanLogEvent, ScanResponse,
     ScanResultsResponse, ScanStartedEvent,
 };
+
+/// Send a system notification about scan status.
+///
+/// Failures are logged but never propagated — notifications are
+/// best-effort and must not affect scan logic.
+fn send_scan_notification(app: &AppHandle, title: &str, body: &str) {
+    if let Err(e) = app
+        .notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show()
+    {
+        warn!("Failed to send notification: {}", e);
+    }
+}
 
 /// Helper function to emit log events
 async fn emit_log(
@@ -110,13 +128,19 @@ pub async fn start_scan(
             Ok(ips) => ips,
             Err(e) => {
                 emit_log(&app_arc, "error", &format!("Failed to parse CIDR: {}", e), None).await;
+                let duration = start_time.elapsed().as_millis() as u64;
                 let complete_event = ScanCompleteEvent {
                     scan_id: scan_id_clone.clone(),
                     device_count: 0,
-                    duration_ms: start_time.elapsed().as_millis() as u64,
+                    duration_ms: duration,
                     status: "error".to_string(),
                 };
                 let _ = app_arc.emit("scan_complete", complete_event);
+                send_scan_notification(
+                    &app_arc,
+                    "NetSentinel",
+                    &format!("Scan failed: invalid CIDR ({})ms", duration),
+                );
                 state_clone.set_running(false);
                 return;
             }
@@ -184,6 +208,11 @@ pub async fn start_scan(
                     };
                     let _ = app_arc.emit("scan_complete", complete_event);
                     emit_log(&app_arc, "info", &format!("Scan completed in {}ms", duration), None).await;
+                    send_scan_notification(
+                        &app_arc,
+                        "NetSentinel",
+                        &format!("Scan completed: {} devices found in {}ms", device_count, duration),
+                    );
 
                     state_clone.set_running(false);
                     return;
@@ -294,6 +323,16 @@ pub async fn start_scan(
                         None,
                     ).await;
 
+                    if status == "cancelled" {
+                        send_scan_notification(&app_arc, "NetSentinel", "Scan cancelled");
+                    } else {
+                        send_scan_notification(
+                            &app_arc,
+                            "NetSentinel",
+                            &format!("Scan completed: {} devices found in {}ms", device_count, duration),
+                        );
+                    }
+
                     state_clone.set_running(false);
                     return;
                 }
@@ -343,6 +382,11 @@ pub async fn start_scan(
                 &format!("Scan completed in {}ms. Found {} devices", duration, device_count),
                 None,
             ).await;
+            send_scan_notification(
+                &app_arc,
+                "NetSentinel",
+                &format!("Scan completed: {} devices found in {}ms", device_count, duration),
+            );
             state_clone.set_running(false);
             return;
         }
@@ -455,18 +499,35 @@ pub async fn start_scan(
                     None,
                 ).await;
 
+                if status == "cancelled" {
+                    send_scan_notification(&app_arc, "NetSentinel", "Scan cancelled");
+                } else {
+                    send_scan_notification(
+                        &app_arc,
+                        "NetSentinel",
+                        &format!("Scan completed: {} devices found in {}ms", device_count, duration),
+                    );
+                }
+
                 state_clone.set_running(false);
             }
             Err(e) => {
                 emit_log(&app_arc, "error", &format!("Discovery failed: {}", e), None).await;
 
+                let duration = start_time.elapsed().as_millis() as u64;
+                let device_count = state_clone.get_devices().await.len() as u32;
                 let complete_event = ScanCompleteEvent {
                     scan_id: scan_id_clone,
-                    device_count: state_clone.get_devices().await.len() as u32,
-                    duration_ms: start_time.elapsed().as_millis() as u64,
+                    device_count,
+                    duration_ms: duration,
                     status: "error".to_string(),
                 };
                 let _ = app_arc.emit("scan_complete", complete_event);
+                send_scan_notification(
+                    &app_arc,
+                    "NetSentinel",
+                    &format!("Scan failed: {} ({}ms)", e, duration),
+                );
                 state_clone.set_running(false);
             }
         }
@@ -495,6 +556,7 @@ pub async fn stop_scan(
     state.set_running(false);
 
     emit_log(&app, "info", "Scan stopped", None).await;
+    send_scan_notification(&app, "NetSentinel", "Scan cancelled");
     Ok(())
 }
 

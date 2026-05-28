@@ -25,7 +25,7 @@ export const NetworkInfoCard: React.FC = memo(() => {
       isLoading={isLoading}
       error={error}
     >
-      <dl className="divide-y divide-gray-700">
+      <dl className="divide-y divide-gray-200 dark:divide-gray-700">
         <InfoRow label="IP Address" value={ipAddress} isLoading={isLoading} />
         <InfoRow label="MAC Address" value={macAddress} isLoading={isLoading} />
         <InfoRow label="Gateway" value={gateway} isLoading={isLoading} />

@@ -11,12 +11,12 @@ interface InfoRowProps {
 export const InfoRow: React.FC<InfoRowProps> = ({ label, value, isLoading = false }) => {
   return (
     <div className="flex justify-between items-center py-2">
-      <dt className="text-sm text-gray-400">{label}</dt>
+      <dt className="text-sm text-gray-500 dark:text-gray-400">{label}</dt>
       <dd
         className={twMerge(
           clsx(
-            'text-sm font-medium text-gray-100',
-            isLoading && 'text-gray-500 italic'
+            'text-sm font-medium text-gray-900 dark:text-gray-100',
+            isLoading && 'text-gray-400 dark:text-gray-500 italic'
           )
         )}
       >

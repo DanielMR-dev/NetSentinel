@@ -186,17 +186,17 @@ export const ScanConfigPanel: React.FC = () => {
   }, [isPaused, resumeScan, pauseScan]);
 
   return (
-    <div className="bg-gradient-to-b from-gray-800 to-gray-800/95 rounded-2xl border border-gray-700/50 shadow-card p-5">
+    <div className="bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-800/95 rounded-2xl border border-gray-200 dark:border-gray-700/50 shadow-card p-5">
       {/* Error Display */}
       {error && (
         <div
           role="alert"
-          className="mb-4 p-3 bg-red-900/30 border border-red-800/50 rounded-xl flex items-center justify-between"
+          className="mb-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 rounded-xl flex items-center justify-between"
         >
-          <span className="text-red-300">{error}</span>
+          <span className="text-red-700 dark:text-red-300">{error}</span>
           <button
             onClick={clearError}
-            className="text-red-400 hover:text-red-300 p-1 rounded-lg hover:bg-red-900/30 transition-colors"
+            className="text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 p-1 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
             aria-label="Dismiss error"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -209,8 +209,8 @@ export const ScanConfigPanel: React.FC = () => {
       <div className="flex flex-wrap gap-4 items-end">
         {/* CIDR Input */}
         <div className="flex-1 min-w-[200px]">
-          <label htmlFor="cidr-input" className="block text-sm font-semibold text-gray-300 mb-2">
-            Target Network <span className="text-gray-500 font-normal">(CIDR)</span>
+          <label htmlFor="cidr-input" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+            Target Network <span className="text-gray-400 dark:text-gray-500 font-normal">(CIDR)</span>
           </label>
           <input
             id="cidr-input"
@@ -221,11 +221,11 @@ export const ScanConfigPanel: React.FC = () => {
             placeholder="192.168.1.0/24"
             className={twMerge(
               clsx(
-                'w-full px-4 py-2.5 bg-gray-900/80 border border-gray-600/50 rounded-xl',
-                'text-gray-100 placeholder-gray-500',
+                'w-full px-4 py-2.5 bg-white dark:bg-gray-900/80 border border-gray-300 dark:border-gray-600/50 rounded-xl',
+                'text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500',
                 'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
-                'transition-all duration-200 hover:border-gray-500'
+                'transition-all duration-200 hover:border-gray-400 dark:hover:border-gray-500'
               )
             )}
           />
@@ -233,8 +233,8 @@ export const ScanConfigPanel: React.FC = () => {
 
         {/* Timeout Input */}
         <div className="w-36">
-          <label htmlFor="timeout-input" className="block text-sm font-semibold text-gray-300 mb-2">
-            Timeout <span className="text-gray-500 font-normal">(ms)</span>
+          <label htmlFor="timeout-input" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+            Timeout <span className="text-gray-400 dark:text-gray-500 font-normal">(ms)</span>
           </label>
           <input
             id="timeout-input"
@@ -247,11 +247,11 @@ export const ScanConfigPanel: React.FC = () => {
             step={100}
             className={twMerge(
               clsx(
-                'w-full px-4 py-2.5 bg-gray-900/80 border border-gray-600/50 rounded-xl',
-                'text-gray-100',
+                'w-full px-4 py-2.5 bg-white dark:bg-gray-900/80 border border-gray-300 dark:border-gray-600/50 rounded-xl',
+                'text-gray-900 dark:text-gray-100',
                 'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
-                'transition-all duration-200 hover:border-gray-500'
+                'transition-all duration-200 hover:border-gray-400 dark:hover:border-gray-500'
               )
             )}
           />
@@ -265,9 +265,9 @@ export const ScanConfigPanel: React.FC = () => {
             disabled={isScanning || !scanPorts}
             className={twMerge(
               clsx(
-                'px-4 py-2.5 bg-gray-700/50 border border-gray-600/50 rounded-xl',
-                'text-gray-100 text-sm font-semibold',
-                'hover:bg-gray-700 hover:border-gray-500 transition-all duration-200',
+                'px-4 py-2.5 bg-gray-100 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600/50 rounded-xl',
+                'text-gray-900 dark:text-gray-100 text-sm font-semibold',
+                'hover:bg-gray-200 dark:hover:bg-gray-700 hover:border-gray-400 dark:hover:border-gray-500 transition-all duration-200',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
                 'focus:outline-none focus:ring-2 focus:ring-blue-500'
               )
@@ -280,7 +280,7 @@ export const ScanConfigPanel: React.FC = () => {
           </button>
 
           {showPortSelector && (
-            <div className="absolute top-full left-0 mt-2 w-96 bg-gradient-to-b from-gray-800 to-gray-800/95 border border-gray-700/50 rounded-xl shadow-xl z-10 p-4">
+            <div className="absolute top-full left-0 mt-2 w-96 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700/50 rounded-xl shadow-xl z-10 p-4">
               {/* Preset buttons */}
               <div className="flex gap-2 mb-3">
                 {Object.keys(PORT_PRESETS).map((name) => (
@@ -288,7 +288,7 @@ export const ScanConfigPanel: React.FC = () => {
                     key={name}
                     type="button"
                     onClick={() => handlePresetClick(name)}
-                    className="px-3 py-1.5 text-xs bg-gray-700 hover:bg-gray-600 rounded-lg text-gray-300 font-medium capitalize transition-colors"
+                    className="px-3 py-1.5 text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-gray-700 dark:text-gray-300 font-medium capitalize transition-colors"
                   >
                     {name}
                   </button>
@@ -310,7 +310,7 @@ export const ScanConfigPanel: React.FC = () => {
                           'hover:scale-105 active:scale-95',
                           isSelected
                             ? 'bg-gradient-to-b from-blue-600 to-blue-700 text-white shadow-md'
-                            : 'bg-gray-700/50 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                            : 'bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-200'
                         )
                       )}
                     >
@@ -330,8 +330,8 @@ export const ScanConfigPanel: React.FC = () => {
                   placeholder="e.g. 8080 or 8000-8100"
                   className={twMerge(
                     clsx(
-                      'flex-1 px-3 py-1.5 bg-gray-900/80 border border-gray-600/50 rounded-lg',
-                      'text-gray-100 text-xs placeholder-gray-500',
+                      'flex-1 px-3 py-1.5 bg-white dark:bg-gray-900/80 border border-gray-300 dark:border-gray-600/50 rounded-lg',
+                      'text-gray-900 dark:text-gray-100 text-xs placeholder-gray-400 dark:placeholder-gray-500',
                       'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
                     )
                   )}
@@ -348,7 +348,7 @@ export const ScanConfigPanel: React.FC = () => {
               {/* Selected ports as removable chips */}
               {selectedPorts.length > 0 && (
                 <div>
-                  <div className="text-xs text-gray-500 mb-1.5 font-medium">
+                  <div className="text-xs text-gray-500 dark:text-gray-500 mb-1.5 font-medium">
                     Selected ({selectedPorts.length}):
                   </div>
                   <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
@@ -358,7 +358,7 @@ export const ScanConfigPanel: React.FC = () => {
                         className={twMerge(
                           clsx(
                             'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium',
-                            'bg-blue-900/50 text-blue-300 border border-blue-700/50'
+                            'bg-blue-50 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700/50'
                           )
                         )}
                       >
@@ -366,7 +366,7 @@ export const ScanConfigPanel: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => handleRemovePort(port)}
-                          className="text-blue-400 hover:text-blue-200 transition-colors"
+                          className="text-blue-500 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-200 transition-colors"
                           aria-label={`Remove port ${port}`}
                         >
                           &times;
@@ -374,7 +374,7 @@ export const ScanConfigPanel: React.FC = () => {
                       </span>
                     ))}
                     {customSelectedPorts.length === 0 && (
-                      <span className="text-xs text-gray-500 italic">
+                      <span className="text-xs text-gray-400 dark:text-gray-500 italic">
                         Toggle ports above or add custom ones
                       </span>
                     )}
@@ -399,8 +399,8 @@ export const ScanConfigPanel: React.FC = () => {
               className={twMerge(
                 clsx(
                   'w-11 h-6 rounded-full transition-all duration-300 relative',
-                  'bg-gray-700 peer-checked:bg-gradient-to-r peer-checked:from-blue-600 peer-checked:to-blue-500',
-                  'peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 peer-focus:ring-offset-2 peer-focus:ring-offset-gray-900',
+                  'bg-gray-300 dark:bg-gray-700 peer-checked:bg-gradient-to-r peer-checked:from-blue-600 peer-checked:to-blue-500',
+                  'peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 peer-focus:ring-offset-2 peer-focus:ring-offset-white dark:peer-focus:ring-offset-gray-900',
                   isScanning && 'opacity-50'
                 )
               )}
@@ -414,7 +414,7 @@ export const ScanConfigPanel: React.FC = () => {
                 )}
               />
             </div>
-            <span className="ml-3 text-sm text-gray-300 font-medium">Scan Ports</span>
+            <span className="ml-3 text-sm text-gray-700 dark:text-gray-300 font-medium">Scan Ports</span>
           </label>
         </div>
 
@@ -475,10 +475,10 @@ export const ScanConfigPanel: React.FC = () => {
       {icmpUnavailable && (
         <div
           role="status"
-          className="mt-3 flex items-center gap-2 px-3 py-2 bg-amber-900/20 border border-amber-700/30 rounded-lg"
+          className="mt-3 flex items-center gap-2 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/30 rounded-lg"
         >
           <svg
-            className="w-4 h-4 text-amber-400 flex-shrink-0"
+            className="w-4 h-4 text-amber-500 dark:text-amber-400 flex-shrink-0"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -491,7 +491,7 @@ export const ScanConfigPanel: React.FC = () => {
               d="M12 9v2m0 4h.01M10.29 3.86l-8.58 14.86A1 1 0 002.58 20h18.84a1 1 0 00.87-1.5L13.71 3.86a1 1 0 00-1.72 0z"
             />
           </svg>
-          <span className="text-xs text-amber-300">
+          <span className="text-xs text-amber-700 dark:text-amber-300">
             ICMP ping is enabled in settings but unavailable without elevated privileges.
             Discovery will fall back to available methods.
           </span>
@@ -500,9 +500,9 @@ export const ScanConfigPanel: React.FC = () => {
 
       {/* Scan Status Display */}
       {isScanning && (
-        <div className="mt-4 flex items-center gap-2 text-sm text-gray-400">
+        <div className="mt-4 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
           <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-          Status: <span className="text-blue-400 font-semibold capitalize">{scanStatus}</span>
+          Status: <span className="text-blue-600 dark:text-blue-400 font-semibold capitalize">{scanStatus}</span>
         </div>
       )}
     </div>

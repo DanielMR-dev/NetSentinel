@@ -32,6 +32,9 @@ pub enum ScanError {
 
     #[error("IO error: {0}")]
     IoError(String),
+
+    #[error("History error: {0}")]
+    HistoryError(String),
 }
 
 impl From<std::io::Error> for ScanError {

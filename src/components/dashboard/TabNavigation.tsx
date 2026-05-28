@@ -1,8 +1,7 @@
 import React, { useCallback, useRef, useEffect } from 'react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-
-type TabId = 'dashboard' | 'scan' | 'settings';
+import type { TabId } from '../../stores/dashboardStore';
 
 interface Tab {
   id: TabId;
@@ -13,6 +12,7 @@ const TABS: Tab[] = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'scan', label: 'Scan' },
   { id: 'settings', label: 'Settings' },
+  { id: 'history', label: 'History' },
 ];
 
 interface TabNavigationProps {
@@ -63,7 +63,7 @@ export const TabNavigation: React.FC<TabNavigationProps> = ({ activeTab, onTabCh
       <ul
         ref={tabListRef}
         role="tablist"
-        className="flex border-b border-gray-700"
+        className="flex border-b border-gray-200 dark:border-gray-700"
       >
         {TABS.map((tab) => {
           const isActive = tab.id === activeTab;
@@ -83,8 +83,8 @@ export const TabNavigation: React.FC<TabNavigationProps> = ({ activeTab, onTabCh
                     'border-b-2 -mb-px',
                     'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset',
                     isActive
-                      ? 'border-blue-500 text-blue-400'
-                      : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'
+                      ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                      : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-400 dark:hover:border-gray-500'
                   )
                 )}
               >

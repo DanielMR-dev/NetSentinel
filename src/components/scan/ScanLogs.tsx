@@ -16,10 +16,10 @@ interface LogEntryProps {
 }
 
 const LOG_COLORS: Record<LogLevel, { text: string; bg: string; border: string }> = {
-  info: { text: 'text-blue-400', bg: 'bg-blue-900/20', border: 'border-blue-800/30' },
-  warn: { text: 'text-amber-400', bg: 'bg-amber-900/20', border: 'border-amber-800/30' },
-  error: { text: 'text-red-400', bg: 'bg-red-900/20', border: 'border-red-800/30' },
-  debug: { text: 'text-gray-400', bg: 'bg-gray-800/30', border: 'border-gray-700/30' },
+  info: { text: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-900/20', border: 'border-blue-200 dark:border-blue-800/30' },
+  warn: { text: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-900/20', border: 'border-amber-200 dark:border-amber-800/30' },
+  error: { text: 'text-red-600 dark:text-red-400', bg: 'bg-red-50 dark:bg-red-900/20', border: 'border-red-200 dark:border-red-800/30' },
+  debug: { text: 'text-gray-500 dark:text-gray-400', bg: 'bg-gray-50 dark:bg-gray-800/30', border: 'border-gray-200 dark:border-gray-700/30' },
 };
 
 const LEVEL_LABELS: Record<LogLevel, string> = {
@@ -52,7 +52,7 @@ const LogEntry: React.FC<LogEntryProps> = ({ level, message, timestamp, target }
         )
       )}
     >
-      <span className={twMerge(clsx('shrink-0 text-gray-500', colors.text))}>
+      <span className={twMerge(clsx('shrink-0 text-gray-400 dark:text-gray-500', colors.text))}>
         [{formatTimestamp(timestamp)}]
       </span>
       <span
@@ -67,11 +67,11 @@ const LogEntry: React.FC<LogEntryProps> = ({ level, message, timestamp, target }
         {LEVEL_LABELS[level]}
       </span>
       {target && (
-        <span className="shrink-0 text-purple-400/80">
+        <span className="shrink-0 text-purple-600 dark:text-purple-400/80">
           [{target}]
         </span>
       )}
-      <span className="text-gray-300 break-all leading-relaxed">{message}</span>
+      <span className="text-gray-700 dark:text-gray-300 break-all leading-relaxed">{message}</span>
     </div>
   );
 };
@@ -92,7 +92,7 @@ export const ScanLogs: React.FC<ScanLogsProps> = ({ maxHeight = 'h-48' }) => {
       ref={containerRef}
       className={twMerge(
         clsx(
-          'overflow-y-auto bg-gray-900/80 rounded-xl border border-gray-700/50',
+          'overflow-y-auto bg-gray-50 dark:bg-gray-900/80 rounded-xl border border-gray-200 dark:border-gray-700/50',
           maxHeight
         )
       )}
@@ -101,9 +101,9 @@ export const ScanLogs: React.FC<ScanLogsProps> = ({ maxHeight = 'h-48' }) => {
       aria-live="polite"
     >
       {logs.length === 0 ? (
-        <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+        <div className="flex items-center justify-center h-full text-gray-400 dark:text-gray-500 text-sm">
           <div className="text-center">
-            <div className="w-8 h-8 mx-auto mb-2 rounded-full bg-gray-800 flex items-center justify-center">
+            <div className="w-8 h-8 mx-auto mb-2 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>

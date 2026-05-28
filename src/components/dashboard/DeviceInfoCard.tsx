@@ -25,7 +25,7 @@ export const DeviceInfoCard: React.FC = memo(() => {
       isLoading={isLoading}
       error={error}
     >
-      <dl className="divide-y divide-gray-700">
+      <dl className="divide-y divide-gray-200 dark:divide-gray-700">
         <InfoRow label="Hostname" value={hostname} isLoading={isLoading} />
         <InfoRow label="Operating System" value={osName} isLoading={isLoading} />
         <InfoRow label="OS Version" value={osVersion} isLoading={isLoading} />

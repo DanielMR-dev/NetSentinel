@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import type { DeviceInfoResponse, NetworkInfoResponse } from '../types/dashboard';
 
-type TabId = 'dashboard' | 'scan' | 'settings';
+export type TabId = 'dashboard' | 'scan' | 'settings' | 'history';
 
 interface DashboardState {
   // Device info fields

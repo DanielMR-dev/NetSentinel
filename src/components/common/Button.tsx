@@ -19,11 +19,11 @@ const variantClasses: Record<ButtonVariant, string> = {
   primary:
     'bg-gradient-to-b from-blue-600 to-blue-700 text-white shadow-md hover:from-blue-600 hover:to-blue-700 hover:shadow-lg hover:brightness-110 active:from-blue-700 active:to-blue-800 active:shadow-sm focus:ring-blue-500',
   secondary:
-    'bg-gradient-to-b from-gray-600 to-gray-700 text-gray-100 shadow-md hover:from-gray-600 hover:to-gray-700 hover:shadow-lg hover:brightness-110 active:from-gray-700 active:to-gray-800 active:shadow-sm focus:ring-gray-500',
+    'bg-gradient-to-b from-gray-200 to-gray-300 text-gray-800 dark:from-gray-600 dark:to-gray-700 dark:text-gray-100 shadow-md hover:brightness-110 active:shadow-sm focus:ring-gray-500',
   danger:
     'bg-gradient-to-b from-red-600 to-red-700 text-white shadow-md hover:from-red-600 hover:to-red-700 hover:shadow-lg hover:brightness-110 active:from-red-700 active:to-red-800 active:shadow-sm focus:ring-red-500',
   ghost:
-    'bg-transparent text-gray-300 hover:bg-gray-700/50 hover:text-gray-100 active:bg-gray-700/70 focus:ring-gray-500',
+    'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 hover:text-gray-900 dark:hover:text-gray-100 active:bg-gray-200 dark:active:bg-gray-700/70 focus:ring-gray-500',
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
@@ -51,7 +51,7 @@ export const Button: React.FC<ButtonProps> = ({
       // Base styles
       'inline-flex items-center justify-center',
       'font-medium rounded-xl transition-all duration-200',
-      'focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900',
+      'focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-gray-900',
       'disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none',
       // Transform on hover/active
       'hover:scale-[1.02] active:scale-[0.98]',

@@ -1,9 +1,11 @@
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback, useState } from 'react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useScanStore, useScanDevices } from '../../stores/scanStore';
 import type { FilterStatus } from '../../stores/scanStore';
 import type { Device } from '../../types/device';
+import { devicesToCSV, devicesToJSON, downloadFile, copyToClipboard } from '../../utils/export';
+import { Button } from '../common/Button';
 
 type SortField = 'ip' | 'mac' | 'hostname' | 'vendor' | 'ports' | 'lastSeen';
 type SortDirection = 'asc' | 'desc';
@@ -31,7 +33,7 @@ const SortIcon: React.FC<SortIconProps> = React.memo(({ field, sortField, sortDi
     {sortField === field ? (
       sortDirection === 'asc' ? '↑' : '↓'
     ) : (
-      <span className="text-gray-600">↕</span>
+      <span className="text-gray-400 dark:text-gray-600">↕</span>
     )}
   </span>
 ));
@@ -55,6 +57,8 @@ export const ScanResultsTable: React.FC = () => {
   const setFilterStatus = useScanStore((s) => s.setFilterStatus);
   const setFilterHasOpenPorts = useScanStore((s) => s.setFilterHasOpenPorts);
   const clearFilters = useScanStore((s) => s.clearFilters);
+
+  const [copyFeedback, setCopyFeedback] = useState(false);
 
   const [sortField, setSortField] = React.useState<SortField>('ip');
   const [sortDirection, setSortDirection] = React.useState<SortDirection>('asc');
@@ -85,6 +89,27 @@ export const ScanResultsTable: React.FC = () => {
   }, [filterHasOpenPorts, setFilterHasOpenPorts]);
 
   const hasActiveFilters = searchQuery !== '' || filterStatus !== 'all' || filterHasOpenPorts;
+
+  const handleExportCSV = useCallback(() => {
+    const csv = devicesToCSV(devices);
+    downloadFile(csv, `netsentinel-scan-${Date.now()}.csv`, 'text/csv');
+  }, [devices]);
+
+  const handleExportJSON = useCallback(() => {
+    const json = devicesToJSON(devices);
+    downloadFile(json, `netsentinel-scan-${Date.now()}.json`, 'application/json');
+  }, [devices]);
+
+  const handleCopyToClipboard = useCallback(async () => {
+    try {
+      const csv = devicesToCSV(devices);
+      await copyToClipboard(csv);
+      setCopyFeedback(true);
+      setTimeout(() => setCopyFeedback(false), 2000);
+    } catch (error) {
+      console.error('Failed to copy to clipboard:', error);
+    }
+  }, [devices]);
 
   // Filter devices based on search query and filter state
   const filteredDevices = useMemo(() => {
@@ -139,15 +164,26 @@ export const ScanResultsTable: React.FC = () => {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Table Header */}
-      <div className="px-4 py-3 border-b border-gray-700 bg-gray-750">
-        <h2 className="text-lg font-semibold text-gray-200">
+      {/* Table Header with Export Toolbar */}
+      <div className="px-4 py-3 border-b border-gray-700 dark:border-gray-700 bg-gray-100 dark:bg-gray-750 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={handleExportCSV} aria-label="Export as CSV">
+            Export CSV
+          </Button>
+          <Button variant="ghost" size="sm" onClick={handleExportJSON} aria-label="Export as JSON">
+            Export JSON
+          </Button>
+          <Button variant="ghost" size="sm" onClick={handleCopyToClipboard} aria-label="Copy results to clipboard">
+            {copyFeedback ? 'Copied!' : 'Copy'}
+          </Button>
+        </div>
+        <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200 whitespace-nowrap">
           Discovered Devices ({devices.length})
         </h2>
       </div>
 
       {/* Search and Filter Bar */}
-      <div className="px-4 py-2 border-b border-gray-700 bg-gray-800/50">
+      <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
         <div className="flex flex-wrap items-center gap-3">
           {/* Search Input */}
           <div className="relative flex-1 min-w-[200px]">
@@ -167,16 +203,17 @@ export const ScanResultsTable: React.FC = () => {
             </svg>
             <input
               type="text"
+              data-search-input
               value={searchQuery}
               onChange={handleSearchChange}
               placeholder="Search devices..."
               aria-label="Search devices"
               className={twMerge(
                 clsx(
-                  'w-full pl-9 pr-3 py-1.5 bg-gray-900/80 border border-gray-600/50 rounded-lg',
-                  'text-sm text-gray-100 placeholder-gray-500',
+                  'w-full pl-9 pr-3 py-1.5 bg-white dark:bg-gray-900/80 border border-gray-300 dark:border-gray-600/50 rounded-lg',
+                  'text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500',
                   'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent',
-                  'transition-all duration-200 hover:border-gray-500'
+                  'transition-all duration-200 hover:border-gray-400 dark:hover:border-gray-500'
                 )
               )}
             />
@@ -197,7 +234,7 @@ export const ScanResultsTable: React.FC = () => {
                     'focus:outline-none focus:ring-2 focus:ring-blue-500',
                     filterStatus === value
                       ? 'bg-blue-600 text-white'
-                      : 'bg-gray-700/50 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                      : 'bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-200'
                   )
                 )}
               >
@@ -218,8 +255,8 @@ export const ScanResultsTable: React.FC = () => {
                 'flex items-center gap-2 px-2.5 py-1 text-xs font-medium rounded-md transition-colors',
                 'focus:outline-none focus:ring-2 focus:ring-blue-500',
                 filterHasOpenPorts
-                  ? 'bg-green-900/50 text-green-400 border border-green-700/50'
-                  : 'bg-gray-700/50 text-gray-400 hover:bg-gray-700 hover:text-gray-200 border border-transparent'
+                  ? 'bg-green-50 dark:bg-green-900/50 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-700/50'
+                  : 'bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-200 border border-transparent'
               )
             )}
           >
@@ -227,7 +264,7 @@ export const ScanResultsTable: React.FC = () => {
               className={twMerge(
                 clsx(
                   'w-3 h-3 rounded-full transition-colors',
-                  filterHasOpenPorts ? 'bg-green-400' : 'bg-gray-600'
+                  filterHasOpenPorts ? 'bg-green-500 dark:bg-green-400' : 'bg-gray-400 dark:bg-gray-600'
                 )
               )}
               aria-hidden="true"
@@ -240,7 +277,7 @@ export const ScanResultsTable: React.FC = () => {
             <button
               type="button"
               onClick={clearFilters}
-              className="px-2.5 py-1 text-xs font-medium text-gray-400 hover:text-gray-200 bg-gray-700/50 hover:bg-gray-700 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="px-2.5 py-1 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 bg-gray-100 dark:bg-gray-700/50 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
               aria-label="Clear all filters"
             >
               Clear
@@ -257,45 +294,45 @@ export const ScanResultsTable: React.FC = () => {
       {/* Table Content - Scrollable */}
       <div className="flex-1 overflow-auto">
         <table className="w-full">
-          <thead className="sticky top-0 bg-gray-750 border-b border-gray-700">
+          <thead className="sticky top-0 bg-gray-50 dark:bg-gray-750 border-b border-gray-200 dark:border-gray-700">
             <tr>
               <th
-                className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-200"
+                className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:hover:text-gray-200"
                 onClick={() => handleSort('ip')}
               >
                 IP Address
                 <SortIcon field="ip" sortField={sortField} sortDirection={sortDirection} />
               </th>
               <th
-                className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-200"
+                className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:hover:text-gray-200"
                 onClick={() => handleSort('mac')}
               >
                 MAC Address
                 <SortIcon field="mac" sortField={sortField} sortDirection={sortDirection} />
               </th>
               <th
-                className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-200"
+                className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:hover:text-gray-200"
                 onClick={() => handleSort('vendor')}
               >
                 Vendor
                 <SortIcon field="vendor" sortField={sortField} sortDirection={sortDirection} />
               </th>
               <th
-                className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-200"
+                className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:hover:text-gray-200"
                 onClick={() => handleSort('hostname')}
               >
                 Hostname
                 <SortIcon field="hostname" sortField={sortField} sortDirection={sortDirection} />
               </th>
               <th
-                className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-200"
+                className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:hover:text-gray-200"
                 onClick={() => handleSort('ports')}
               >
                 Open Ports
                 <SortIcon field="ports" sortField={sortField} sortDirection={sortDirection} />
               </th>
               <th
-                className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-200"
+                className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:hover:text-gray-200"
                 onClick={() => handleSort('lastSeen')}
               >
                 Last Seen
@@ -303,7 +340,7 @@ export const ScanResultsTable: React.FC = () => {
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-700">
+          <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
             {sortedDevices.map((device) => (
               <DeviceRow
                 key={device.mac || device.ip}
@@ -316,13 +353,13 @@ export const ScanResultsTable: React.FC = () => {
         </table>
 
         {devices.length === 0 && (
-          <div className="p-8 text-center text-gray-500">
+          <div className="p-8 text-center text-gray-500 dark:text-gray-500">
             No devices discovered yet
           </div>
         )}
 
         {devices.length > 0 && filteredDevices.length === 0 && (
-          <div className="p-8 text-center text-gray-500">
+          <div className="p-8 text-center text-gray-500 dark:text-gray-500">
             No devices match the current filters
           </div>
         )}
@@ -353,17 +390,17 @@ const DeviceRow: React.FC<DeviceRowProps> = React.memo(({ device, isSelected, on
       className={twMerge(
         clsx(
           'cursor-pointer transition-colors',
-          isSelected ? 'bg-blue-900/30' : 'hover:bg-gray-700/50'
+          isSelected ? 'bg-blue-50 dark:bg-blue-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
         )
       )}
     >
-      <td className="px-4 py-3 text-sm text-gray-200 font-mono">{device.ip}</td>
-      <td className="px-4 py-3 text-sm text-gray-400 font-mono">{device.mac}</td>
-      <td className="px-4 py-3 text-sm text-gray-300 max-w-[150px] truncate">
-        {device.vendor || <span className="text-gray-600">—</span>}
+      <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-200 font-mono">{device.ip}</td>
+      <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 font-mono">{device.mac}</td>
+      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 max-w-[150px] truncate">
+        {device.vendor || <span className="text-gray-400 dark:text-gray-600">—</span>}
       </td>
-      <td className="px-4 py-3 text-sm text-gray-300">
-        {device.hostname || <span className="text-gray-600 italic">Unknown</span>}
+      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+        {device.hostname || <span className="text-gray-400 dark:text-gray-600 italic">Unknown</span>}
       </td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap gap-1">
@@ -373,26 +410,26 @@ const DeviceRow: React.FC<DeviceRowProps> = React.memo(({ device, isSelected, on
             .map((port) => (
               <span
                 key={port.number}
-                className="px-2 py-0.5 bg-green-900/50 text-green-400 text-xs rounded"
+                className="px-2 py-0.5 bg-green-50 dark:bg-green-900/50 text-green-700 dark:text-green-400 text-xs rounded"
                 title={port.service ?? `Port ${port.number}`}
               >
                 {port.number}
                 {port.service && (
-                  <span className="ml-1 text-green-400/70">{port.service}</span>
+                  <span className="ml-1 text-green-600 dark:text-green-400/70">{port.service}</span>
                 )}
               </span>
             ))}
           {openPortCount > 5 && (
-            <span className="px-2 py-0.5 bg-gray-700 text-gray-400 text-xs rounded">
+            <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 text-xs rounded">
               +{openPortCount - 5} more
             </span>
           )}
           {openPortCount === 0 && (
-            <span className="px-2 py-0.5 bg-gray-700 text-gray-500 text-xs rounded">None</span>
+            <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 text-xs rounded">None</span>
           )}
         </div>
       </td>
-      <td className="px-4 py-3 text-sm text-gray-500">
+      <td className="px-4 py-3 text-sm text-gray-400 dark:text-gray-500">
         {new Date(device.lastSeen * 1000).toLocaleTimeString()}
       </td>
     </tr>

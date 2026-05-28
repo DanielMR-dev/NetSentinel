@@ -7,7 +7,7 @@ use crate::error::ScanError;
 use crate::settings::{default_settings, SettingsManager, SettingsProfile};
 
 /// Get the configuration directory for NetSentinel
-fn get_config_dir() -> Result<PathBuf, ScanError> {
+pub(crate) fn get_config_dir() -> Result<PathBuf, ScanError> {
     dirs::config_dir()
         .map(|p| p.join("netsentinel"))
         .ok_or_else(|| ScanError::NetworkError("Could not determine config directory".to_string()))

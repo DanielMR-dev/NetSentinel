@@ -23,8 +23,8 @@ export const Card: React.FC<CardProps> = ({
   const mergedClassName = twMerge(
     clsx(
       // Base container with gradient and shadow
-      'bg-gradient-to-b from-gray-800 to-gray-800/95',
-      'border border-gray-700/50 rounded-2xl',
+      'bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-800/95',
+      'border border-gray-200 dark:border-gray-700/50 rounded-2xl',
       'shadow-card hover:shadow-card-hover transition-shadow duration-300',
       // Inner content area
       'overflow-hidden',
@@ -35,10 +35,10 @@ export const Card: React.FC<CardProps> = ({
   return (
     <div className={mergedClassName}>
       {/* Header with subtle gradient */}
-      <div className="relative px-6 py-4 border-b border-gray-700/30">
+      <div className="relative px-6 py-4 border-b border-gray-200 dark:border-gray-700/30">
         <div className="absolute inset-0 bg-gradient-to-r from-blue-600/5 via-transparent to-transparent" />
         <div className="relative flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-100">{title}</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
           {onReload && (
             <button
               onClick={onReload}
@@ -47,8 +47,8 @@ export const Card: React.FC<CardProps> = ({
               className={twMerge(
                 clsx(
                   'p-2 rounded-xl transition-all duration-200',
-                  'hover:bg-gray-700/50 focus:outline-none focus:ring-2 focus:ring-blue-500',
-                  'text-gray-400 hover:text-gray-200',
+                  'hover:bg-gray-200 dark:hover:bg-gray-700/50 focus:outline-none focus:ring-2 focus:ring-blue-500',
+                  'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200',
                   'disabled:opacity-50 disabled:cursor-not-allowed',
                   'hover:scale-105 active:scale-95'
                 )
@@ -82,7 +82,7 @@ export const Card: React.FC<CardProps> = ({
         {error && (
           <div
             role="alert"
-            className="mb-4 p-3 bg-red-900/30 border border-red-800/50 rounded-xl text-sm text-red-300"
+            className="mb-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 rounded-xl text-sm text-red-700 dark:text-red-300"
           >
             {error}
           </div>
