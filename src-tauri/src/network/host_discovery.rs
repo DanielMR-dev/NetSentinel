@@ -152,21 +152,15 @@ pub async fn discover_hosts(
     Ok(result)
 }
 
-/// Get MAC address from /proc/net/arp for a given IP
+/// Get MAC address from the system ARP cache for a given IP.
+///
+/// Delegates to the platform-specific `ArpProvider` implementation:
+/// - **Linux**: Reads `/proc/net/arp`
+/// - **Windows**: Executes `arp -a` and searches output
+/// - **macOS**: Executes `arp -a` and searches output
 async fn get_mac_from_arp(ip: &str) -> Option<String> {
-    let content = tokio::fs::read_to_string("/proc/net/arp").await.ok()?;
-
-    for line in content.lines().skip(1) {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 4 && parts[0] == ip {
-            let mac = parts[3];
-            if mac != "00:00:00:00:00:00" {
-                return Some(mac.to_string());
-            }
-        }
-    }
-
-    None
+    let provider = crate::network::platform::create_arp_provider();
+    provider.get_mac_for_ip(ip).await
 }
 
 /// Check if a host is alive by probing common ports

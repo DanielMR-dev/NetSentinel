@@ -2,37 +2,17 @@ use log::info;
 use sysinfo::Networks;
 
 use crate::commands::{CommandError, NetworkInfo};
+use crate::network::platform;
 
-/// Get the default gateway IP by reading /proc/net/route on Linux
-fn get_default_gateway() -> Option<String> {
-    // Try to read gateway from /proc/net/route on Linux
-    if let Ok(content) = std::fs::read_to_string("/proc/net/route") {
-        for line in content.lines().skip(1) {
-            let fields: Vec<&str> = line.split('\t').collect();
-            if fields.len() >= 3 {
-                let _interface = fields[0];
-                let destination = fields[1];
-                let gateway = fields[2];
-
-                // Default route has destination 00000000 and gateway not 00000000
-                if destination == "00000000" && gateway != "00000000" {
-                    // Convert hex IP to dotted notation
-                    let gateway_hex = gateway.to_string();
-                    if gateway_hex.len() == 8 {
-                        let ip_str = format!(
-                            "{}.{}.{}.{}",
-                            u8::from_str_radix(&gateway_hex[6..8], 16).ok()?,
-                            u8::from_str_radix(&gateway_hex[4..6], 16).ok()?,
-                            u8::from_str_radix(&gateway_hex[2..4], 16).ok()?,
-                            u8::from_str_radix(&gateway_hex[0..2], 16).ok()?
-                        );
-                        return Some(ip_str);
-                    }
-                }
-            }
-        }
-    }
-    None
+/// Get the default gateway IP using the platform-specific gateway provider.
+///
+/// Delegates to the platform-specific `GatewayProvider` implementation:
+/// - **Linux**: Parses `/proc/net/route`
+/// - **Windows**: Executes `route print 0.0.0.0` and parses output
+/// - **macOS**: Executes `route -n get default` (fallback: `netstat -rn`)
+async fn get_default_gateway() -> Option<String> {
+    let provider = platform::create_gateway_provider();
+    provider.get_default_gateway().await
 }
 
 /// Get network information (IP address, MAC address, gateway, network name)
@@ -44,11 +24,13 @@ pub async fn get_network_info() -> Result<NetworkInfo, CommandError> {
     let mut mac_address = String::from("unknown");
     let mut network_name = String::from("unknown");
 
-    let gateway = get_default_gateway().unwrap_or_else(|| "unknown".to_string());
+    let gateway = get_default_gateway()
+        .await
+        .unwrap_or_else(|| "unknown".to_string());
 
     for (interface_name, data) in networks.iter() {
-        // Skip loopback interfaces
-        if interface_name == "lo" || interface_name == "lo0" {
+        // Skip loopback interfaces (cross-platform)
+        if platform::is_loopback_interface(interface_name) {
             continue;
         }
 
