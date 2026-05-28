@@ -5,7 +5,7 @@ use tokio::sync::oneshot;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::error::ScanError;
-use crate::network::{cidr, discovery, host_discovery};
+use crate::network::{cidr, discovery, host_discovery, icmp};
 use crate::state::SharedScanState;
 use crate::types::{
     DeviceFoundEvent, ScanCompleteEvent, ScanLogEvent, ScanResponse,
@@ -152,7 +152,121 @@ pub async fn start_scan(
                 emit_log(
                     &app_arc,
                     "warn",
-                    "ARP table empty or unavailable, using TCP probing",
+                    "ARP table empty or unavailable, trying ICMP ping sweep",
+                    None,
+                ).await;
+            }
+        }
+
+        // Try ICMP ping sweep before falling back to TCP probing
+        match try_icmp_discovery(&ips, timeout_ms, app_arc.clone()).await {
+            Ok(devices) if !devices.is_empty() => {
+                emit_log(
+                    &app_arc,
+                    "info",
+                    &format!("ICMP discovery found {} devices", devices.len()),
+                    None,
+                ).await;
+
+                // Process ICMP discovered devices
+                for device in &devices {
+                    state_clone.add_device(device.clone()).await;
+                }
+
+                // Scan ports on discovered devices if requested
+                let ports_to_scan = if scan_ports {
+                    if ports.is_empty() {
+                        host_discovery::DEFAULT_PORTS.to_vec()
+                    } else {
+                        ports
+                    }
+                } else {
+                    Vec::new()
+                };
+
+                if scan_ports && !ports_to_scan.is_empty() {
+                    for device in &devices {
+                        emit_log(
+                            &app_arc,
+                            "info",
+                            &format!("Scanning ports on {}", device.ip),
+                            Some(&device.ip),
+                        ).await;
+
+                        let ip_addr: std::net::IpAddr = match device.ip.parse() {
+                            Ok(ip) => ip,
+                            Err(e) => {
+                                emit_log(
+                                    &app_arc,
+                                    "error",
+                                    &format!("Invalid IP: {} - {}", device.ip, e),
+                                    None,
+                                ).await;
+                                continue;
+                            }
+                        };
+
+                        let scanned_ports =
+                            host_discovery::scan_ports(ip_addr, &ports_to_scan, timeout_ms).await;
+
+                        let mut updated_device = device.clone();
+                        updated_device.ports = scanned_ports;
+                        state_clone.add_device(updated_device.clone()).await;
+
+                        let event = DeviceFoundEvent {
+                            ip: updated_device.ip.clone(),
+                            mac: updated_device.mac.clone(),
+                            hostname: updated_device.hostname.clone(),
+                            timestamp: chrono::Utc::now().timestamp(),
+                            ports: updated_device.ports.clone(),
+                            discovery_method: "IcmpPing".to_string(),
+                        };
+                        let _ = app_arc.emit("device_found", event);
+                    }
+                }
+
+                let duration = start_time.elapsed().as_millis() as u64;
+                let device_count = state_clone.get_devices().await.len() as u32;
+
+                let complete_event = ScanCompleteEvent {
+                    scan_id: scan_id_clone.clone(),
+                    device_count,
+                    duration_ms: duration,
+                    status: "completed".to_string(),
+                };
+                let _ = app_arc.emit("scan_complete", complete_event);
+
+                emit_log(
+                    &app_arc,
+                    "info",
+                    &format!("Scan completed in {}ms. Found {} devices", duration, device_count),
+                    None,
+                ).await;
+
+                state_clone.set_running(false).await;
+                return;
+            }
+            Ok(_) => {
+                emit_log(
+                    &app_arc,
+                    "info",
+                    "ICMP sweep found no hosts, falling back to TCP probing",
+                    None,
+                ).await;
+            }
+            Err(ScanError::PermissionDenied(msg)) => {
+                emit_log(
+                    &app_arc,
+                    "warn",
+                    &format!("ICMP unavailable (privileges): {}. Using TCP probing.", msg),
+                    None,
+                ).await;
+            }
+            Err(e) => {
+                emit_log(
+                    &app_arc,
+                    "warn",
+                    &format!("ICMP sweep failed: {}. Using TCP probing.", e),
                     None,
                 ).await;
             }
@@ -344,4 +458,32 @@ pub async fn get_scan_results(
         scanned_count: scanned,
         total_hosts: total,
     })
+}
+
+/// Attempt ICMP ping sweep discovery.
+///
+/// Checks privileges first, then runs an ICMP sweep. Returns the list of
+/// devices that responded to ICMP Echo Requests.
+///
+/// # Errors
+/// - `ScanError::PermissionDenied` if the process lacks raw socket privileges
+/// - `ScanError::NetworkError` if the ICMP sweep encounters a fatal error
+async fn try_icmp_discovery(
+    ips: &[std::net::IpAddr],
+    timeout_ms: u64,
+    app: Arc<tauri::AppHandle>,
+) -> Result<Vec<crate::types::Device>, ScanError> {
+    // Check privileges before attempting ICMP
+    icmp::check_icmp_privileges()?;
+
+    // Run ICMP ping sweep
+    let devices = icmp::icmp_ping_sweep(
+        ips.to_vec(),
+        timeout_ms,
+        50, // max concurrent pings
+        app,
+    )
+    .await?;
+
+    Ok(devices)
 }
