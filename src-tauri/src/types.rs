@@ -66,6 +66,7 @@ pub struct Device {
     pub ip: String,
     pub mac: String,
     pub hostname: Option<String>,
+    pub vendor: Option<String>,
     pub status: DeviceStatus,
     pub ports: Vec<Port>,
     pub last_seen: i64,
@@ -77,6 +78,7 @@ impl Device {
             ip,
             mac: String::new(),
             hostname: None,
+            vendor: None,
             status: DeviceStatus::Unknown,
             ports: Vec::new(),
             last_seen: chrono::Utc::now().timestamp(),
@@ -90,6 +92,11 @@ impl Device {
 
     pub fn with_hostname(mut self, hostname: Option<String>) -> Self {
         self.hostname = hostname;
+        self
+    }
+
+    pub fn with_vendor(mut self, vendor: Option<String>) -> Self {
+        self.vendor = vendor;
         self
     }
 
@@ -125,6 +132,7 @@ pub struct DeviceFoundEvent {
     pub ip: String,
     pub mac: String,
     pub hostname: Option<String>,
+    pub vendor: Option<String>,
     pub timestamp: i64,
     pub ports: Vec<Port>,
     pub discovery_method: String,

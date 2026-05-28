@@ -37,6 +37,7 @@ pub async fn discover_devices(
                     ip: device.ip.clone(),
                     mac: device.mac.clone(),
                     hostname: device.hostname.clone(),
+                    vendor: device.vendor.clone(),
                     timestamp: chrono::Utc::now().timestamp(),
                     ports: device.ports.clone(),
                     discovery_method: "ArpTable".to_string(),

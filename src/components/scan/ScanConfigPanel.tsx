@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useScanStore } from '../../stores/scanStore';
@@ -84,7 +84,18 @@ export const ScanConfigPanel: React.FC = () => {
   const clearError = useScanStore((s) => s.clearError);
 
   const capabilities = useCapabilitiesStore((s) => s.capabilities);
-  const discoveryMethods = useSettingsStore((s) => s.settings.scanConfig.discoveryMethods);
+  const settings = useSettingsStore((s) => s.settings);
+  const discoveryMethods = settings.scanConfig.discoveryMethods;
+  const syncFromSettings = useScanStore((s) => s.syncFromSettings);
+
+  // Sync scan config from the active settings profile on profile change
+  useEffect(() => {
+    if (settings?.scanConfig && !isScanning) {
+      syncFromSettings(settings.scanConfig);
+    }
+    // Only re-sync when the profile ID changes, not on every settings edit
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings?.id]);
 
   // Check if ICMP is configured but unavailable
   const icmpUnavailable = useMemo(() => {

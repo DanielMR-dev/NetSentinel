@@ -2,9 +2,10 @@ import React, { useMemo, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useScanStore, useScanDevices } from '../../stores/scanStore';
+import type { FilterStatus } from '../../stores/scanStore';
 import type { Device } from '../../types/device';
 
-type SortField = 'ip' | 'mac' | 'hostname' | 'ports' | 'lastSeen';
+type SortField = 'ip' | 'mac' | 'hostname' | 'vendor' | 'ports' | 'lastSeen';
 type SortDirection = 'asc' | 'desc';
 
 /** Compare two IPv4 addresses numerically by octet */
@@ -36,10 +37,24 @@ const SortIcon: React.FC<SortIconProps> = React.memo(({ field, sortField, sortDi
 ));
 SortIcon.displayName = 'SortIcon';
 
+const STATUS_FILTER_OPTIONS: { value: FilterStatus; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'online', label: 'Online' },
+  { value: 'offline', label: 'Offline' },
+  { value: 'unknown', label: 'Unknown' },
+];
+
 export const ScanResultsTable: React.FC = () => {
   const devices = useScanDevices();
   const selectedDeviceId = useScanStore((s) => s.selectedDeviceId);
   const selectDevice = useScanStore((s) => s.selectDevice);
+  const searchQuery = useScanStore((s) => s.searchQuery);
+  const filterStatus = useScanStore((s) => s.filterStatus);
+  const filterHasOpenPorts = useScanStore((s) => s.filterHasOpenPorts);
+  const setSearchQuery = useScanStore((s) => s.setSearchQuery);
+  const setFilterStatus = useScanStore((s) => s.setFilterStatus);
+  const setFilterHasOpenPorts = useScanStore((s) => s.setFilterHasOpenPorts);
+  const clearFilters = useScanStore((s) => s.clearFilters);
 
   const [sortField, setSortField] = React.useState<SortField>('ip');
   const [sortDirection, setSortDirection] = React.useState<SortDirection>('asc');
@@ -57,8 +72,44 @@ export const ScanResultsTable: React.FC = () => {
     selectDevice(ip);
   }, [selectDevice]);
 
+  const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(e.target.value);
+  }, [setSearchQuery]);
+
+  const handleStatusFilterChange = useCallback((status: FilterStatus) => {
+    setFilterStatus(status);
+  }, [setFilterStatus]);
+
+  const handleOpenPortsToggle = useCallback(() => {
+    setFilterHasOpenPorts(!filterHasOpenPorts);
+  }, [filterHasOpenPorts, setFilterHasOpenPorts]);
+
+  const hasActiveFilters = searchQuery !== '' || filterStatus !== 'all' || filterHasOpenPorts;
+
+  // Filter devices based on search query and filter state
+  const filteredDevices = useMemo(() => {
+    return devices.filter((device) => {
+      // Search filter — case-insensitive substring match on IP, MAC, hostname, vendor
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        const matchesSearch =
+          device.ip.toLowerCase().includes(query) ||
+          device.mac.toLowerCase().includes(query) ||
+          (device.hostname?.toLowerCase().includes(query) ?? false) ||
+          (device.vendor?.toLowerCase().includes(query) ?? false);
+        if (!matchesSearch) return false;
+      }
+      // Status filter
+      if (filterStatus !== 'all' && device.status !== filterStatus) return false;
+      // Open ports filter
+      if (filterHasOpenPorts && !device.ports.some((p) => p.state === 'open')) return false;
+      return true;
+    });
+  }, [devices, searchQuery, filterStatus, filterHasOpenPorts]);
+
+  // Sort filtered devices
   const sortedDevices = useMemo(() => {
-    const sorted = [...devices];
+    const sorted = [...filteredDevices];
     sorted.sort((a, b) => {
       let comparison = 0;
       switch (sortField) {
@@ -69,7 +120,10 @@ export const ScanResultsTable: React.FC = () => {
           comparison = a.mac.localeCompare(b.mac);
           break;
         case 'hostname':
-          comparison = (a.hostname || '').localeCompare(b.hostname || '');
+          comparison = (a.hostname ?? '').localeCompare(b.hostname ?? '');
+          break;
+        case 'vendor':
+          comparison = (a.vendor ?? '').localeCompare(b.vendor ?? '');
           break;
         case 'ports':
           comparison = a.ports.length - b.ports.length;
@@ -81,7 +135,7 @@ export const ScanResultsTable: React.FC = () => {
       return sortDirection === 'asc' ? comparison : -comparison;
     });
     return sorted;
-  }, [devices, sortField, sortDirection]);
+  }, [filteredDevices, sortField, sortDirection]);
 
   return (
     <div className="h-full flex flex-col">
@@ -90,6 +144,114 @@ export const ScanResultsTable: React.FC = () => {
         <h2 className="text-lg font-semibold text-gray-200">
           Discovered Devices ({devices.length})
         </h2>
+      </div>
+
+      {/* Search and Filter Bar */}
+      <div className="px-4 py-2 border-b border-gray-700 bg-gray-800/50">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Search Input */}
+          <div className="relative flex-1 min-w-[200px]">
+            <svg
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+              />
+            </svg>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={handleSearchChange}
+              placeholder="Search devices..."
+              aria-label="Search devices"
+              className={twMerge(
+                clsx(
+                  'w-full pl-9 pr-3 py-1.5 bg-gray-900/80 border border-gray-600/50 rounded-lg',
+                  'text-sm text-gray-100 placeholder-gray-500',
+                  'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent',
+                  'transition-all duration-200 hover:border-gray-500'
+                )
+              )}
+            />
+          </div>
+
+          {/* Status Filter Buttons */}
+          <div className="flex items-center gap-1" role="radiogroup" aria-label="Filter by status">
+            {STATUS_FILTER_OPTIONS.map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={filterStatus === value}
+                onClick={() => handleStatusFilterChange(value)}
+                className={twMerge(
+                  clsx(
+                    'px-2.5 py-1 text-xs font-medium rounded-md transition-colors',
+                    'focus:outline-none focus:ring-2 focus:ring-blue-500',
+                    filterStatus === value
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-700/50 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                  )
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Has Open Ports Toggle */}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={filterHasOpenPorts}
+            aria-label="Filter devices with open ports"
+            onClick={handleOpenPortsToggle}
+            className={twMerge(
+              clsx(
+                'flex items-center gap-2 px-2.5 py-1 text-xs font-medium rounded-md transition-colors',
+                'focus:outline-none focus:ring-2 focus:ring-blue-500',
+                filterHasOpenPorts
+                  ? 'bg-green-900/50 text-green-400 border border-green-700/50'
+                  : 'bg-gray-700/50 text-gray-400 hover:bg-gray-700 hover:text-gray-200 border border-transparent'
+              )
+            )}
+          >
+            <span
+              className={twMerge(
+                clsx(
+                  'w-3 h-3 rounded-full transition-colors',
+                  filterHasOpenPorts ? 'bg-green-400' : 'bg-gray-600'
+                )
+              )}
+              aria-hidden="true"
+            />
+            Has open ports
+          </button>
+
+          {/* Clear Filters */}
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="px-2.5 py-1 text-xs font-medium text-gray-400 hover:text-gray-200 bg-gray-700/50 hover:bg-gray-700 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+              aria-label="Clear all filters"
+            >
+              Clear
+            </button>
+          )}
+
+          {/* Result Count */}
+          <span className="text-xs text-gray-500 ml-auto whitespace-nowrap" aria-live="polite">
+            Showing {filteredDevices.length} of {devices.length} devices
+          </span>
+        </div>
       </div>
 
       {/* Table Content - Scrollable */}
@@ -110,6 +272,13 @@ export const ScanResultsTable: React.FC = () => {
               >
                 MAC Address
                 <SortIcon field="mac" sortField={sortField} sortDirection={sortDirection} />
+              </th>
+              <th
+                className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-200"
+                onClick={() => handleSort('vendor')}
+              >
+                Vendor
+                <SortIcon field="vendor" sortField={sortField} sortDirection={sortDirection} />
               </th>
               <th
                 className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-200"
@@ -151,6 +320,12 @@ export const ScanResultsTable: React.FC = () => {
             No devices discovered yet
           </div>
         )}
+
+        {devices.length > 0 && filteredDevices.length === 0 && (
+          <div className="p-8 text-center text-gray-500">
+            No devices match the current filters
+          </div>
+        )}
       </div>
     </div>
   );
@@ -184,6 +359,9 @@ const DeviceRow: React.FC<DeviceRowProps> = React.memo(({ device, isSelected, on
     >
       <td className="px-4 py-3 text-sm text-gray-200 font-mono">{device.ip}</td>
       <td className="px-4 py-3 text-sm text-gray-400 font-mono">{device.mac}</td>
+      <td className="px-4 py-3 text-sm text-gray-300 max-w-[150px] truncate">
+        {device.vendor || <span className="text-gray-600">—</span>}
+      </td>
       <td className="px-4 py-3 text-sm text-gray-300">
         {device.hostname || <span className="text-gray-600 italic">Unknown</span>}
       </td>
@@ -196,7 +374,7 @@ const DeviceRow: React.FC<DeviceRowProps> = React.memo(({ device, isSelected, on
               <span
                 key={port.number}
                 className="px-2 py-0.5 bg-green-900/50 text-green-400 text-xs rounded"
-                title={port.service || `Port ${port.number}`}
+                title={port.service ?? `Port ${port.number}`}
               >
                 {port.number}
                 {port.service && (

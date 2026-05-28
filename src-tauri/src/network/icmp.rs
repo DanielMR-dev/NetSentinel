@@ -34,6 +34,7 @@ use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tauri::Emitter;
 
 use crate::error::ScanError;
+use crate::network::{host_discovery, oui};
 use crate::types::{Device, DeviceFoundEvent, DeviceStatus, ScanProgressEvent};
 
 /// Maximum concurrent ICMP pings
@@ -406,7 +407,15 @@ pub async fn icmp_ping_sweep(
                         // Try to resolve MAC address via ARP cache
                         let provider = crate::network::platform::create_arp_provider();
                         if let Some(mac) = provider.get_mac_for_ip(&ip_str).await {
+                            // Look up OUI vendor
+                            let vendor = oui::lookup_vendor(&mac);
                             device.mac = mac;
+                            device.vendor = vendor;
+                        }
+
+                        // Attempt reverse DNS lookup
+                        if let Some(hostname) = host_discovery::reverse_dns_lookup(&ip_str).await {
+                            device.hostname = Some(hostname);
                         }
 
                         emit_log(
@@ -422,6 +431,7 @@ pub async fn icmp_ping_sweep(
                             ip: device.ip.clone(),
                             mac: device.mac.clone(),
                             hostname: device.hostname.clone(),
+                            vendor: device.vendor.clone(),
                             timestamp: chrono::Utc::now().timestamp(),
                             ports: Vec::new(),
                             discovery_method: "IcmpPing".to_string(),

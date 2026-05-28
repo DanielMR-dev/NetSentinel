@@ -67,6 +67,12 @@ export const DeviceDetailPanel: React.FC<DeviceDetailPanelProps> = ({ device }) 
               <span className="text-gray-400">MAC Address</span>
               <span className="text-gray-200 font-mono">{device.mac}</span>
             </div>
+            {device.vendor && (
+              <div className="flex justify-between">
+                <span className="text-gray-400">Vendor</span>
+                <span className="text-gray-200">{device.vendor}</span>
+              </div>
+            )}
             {device.hostname && (
               <div className="flex justify-between">
                 <span className="text-gray-400">Hostname</span>

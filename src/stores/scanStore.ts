@@ -9,8 +9,12 @@ import type {
   ScanResponse,
   ScanLogEvent,
 } from '../types/device';
+import type { ScanConfig } from '../types/settings';
+import { useSettingsStore } from './settingsStore';
 
 type ScanStatus = 'idle' | 'scanning' | 'paused' | 'completed' | 'cancelled' | 'error';
+
+export type FilterStatus = 'all' | 'online' | 'offline' | 'unknown';
 
 interface ScanState {
   // Scan configuration
@@ -34,6 +38,11 @@ interface ScanState {
   devices: Device[];
   selectedDeviceId: string | null;
 
+  // Search and filtering
+  searchQuery: string;
+  filterStatus: FilterStatus;
+  filterHasOpenPorts: boolean;
+
   // Logs
   logs: ScanLogEvent[];
 
@@ -53,6 +62,13 @@ interface ScanActions {
   selectDevice: (deviceId: string | null) => void;
   clearResults: () => void;
   clearError: () => void;
+  // Search and filtering
+  setSearchQuery: (query: string) => void;
+  setFilterStatus: (status: FilterStatus) => void;
+  setFilterHasOpenPorts: (hasPorts: boolean) => void;
+  clearFilters: () => void;
+  // Settings sync
+  syncFromSettings: (scanConfig: ScanConfig) => void;
   // Internal updaters for events
   _addDevice: (device: Device) => void;
   _updateProgress: (scanned: number, total: number, currentTarget: string) => void;
@@ -85,6 +101,10 @@ export const useScanStore = create<ScanStore>((set, get) => ({
   devices: [],
   selectedDeviceId: null,
 
+  searchQuery: '',
+  filterStatus: 'all',
+  filterHasOpenPorts: false,
+
   logs: [],
 
   error: null,
@@ -100,6 +120,10 @@ export const useScanStore = create<ScanStore>((set, get) => ({
 
   startScan: async () => {
     const { cidr, scanPorts, selectedPorts, timeoutMs } = get();
+
+    // Read from settings store for advanced scan parameters
+    const settings = useSettingsStore.getState().settings;
+    const scanConfig = settings?.scanConfig;
 
     // Reset state
     set({
@@ -122,6 +146,9 @@ export const useScanStore = create<ScanStore>((set, get) => ({
         timeoutMs,
         scanPorts,
         ports: scanPorts ? selectedPorts : [],
+        maxConcurrentHosts: scanConfig?.maxConcurrentHosts ?? null,
+        discoveryMethods: scanConfig?.discoveryMethods ?? null,
+        retryCount: scanConfig?.retryCount ?? null,
       });
 
       set({ scanId: response.scan_id });
@@ -180,6 +207,35 @@ export const useScanStore = create<ScanStore>((set, get) => ({
     set({ error: null });
   },
 
+  // Search and filtering actions
+  setSearchQuery: (query: string) => set({ searchQuery: query }),
+
+  setFilterStatus: (status: FilterStatus) => set({ filterStatus: status }),
+
+  setFilterHasOpenPorts: (hasPorts: boolean) => set({ filterHasOpenPorts: hasPorts }),
+
+  clearFilters: () => set({ searchQuery: '', filterStatus: 'all', filterHasOpenPorts: false }),
+
+  // Settings sync — update scan defaults from the active settings profile
+  syncFromSettings: (scanConfig: ScanConfig) => {
+    const { isScanning } = get();
+    // Only sync when NOT scanning to avoid overriding user's manual changes
+    if (isScanning) return;
+
+    const updates: Partial<ScanState> = {};
+    if (scanConfig.defaultCidr) {
+      updates.cidr = scanConfig.defaultCidr;
+    }
+    if (scanConfig.timeoutMs) {
+      updates.timeoutMs = scanConfig.timeoutMs;
+    }
+    updates.scanPorts = scanConfig.scanPortsEnabled;
+    if (scanConfig.selectedPorts?.length) {
+      updates.selectedPorts = scanConfig.selectedPorts;
+    }
+    set(updates);
+  },
+
   // Internal updaters for event-driven updates
   _addDevice: (device: Device) => {
     const state = get();
@@ -232,6 +288,7 @@ export async function setupScanEventListeners() {
       ip: event.payload.ip,
       mac: event.payload.mac,
       hostname: event.payload.hostname,
+      vendor: event.payload.vendor,
       status: 'online',
       ports: event.payload.ports || [],
       lastSeen: event.payload.timestamp,
@@ -285,3 +342,6 @@ export const useScanDevices = () => useScanStore((s) => s.devices);
 export const useScanIsScanning = () => useScanStore((s) => s.isScanning);
 export const useScanStatus = () => useScanStore((s) => s.scanStatus);
 export const useScanLogs = () => useScanStore((s) => s.logs);
+export const useSearchQuery = () => useScanStore((s) => s.searchQuery);
+export const useFilterStatus = () => useScanStore((s) => s.filterStatus);
+export const useFilterHasOpenPorts = () => useScanStore((s) => s.filterHasOpenPorts);

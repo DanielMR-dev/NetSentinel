@@ -13,6 +13,7 @@ export interface Device {
   ip: string;
   mac: string;
   hostname?: string;
+  vendor?: string;
   status: DeviceStatus;
   ports: Port[];
   lastSeen: number;
@@ -34,6 +35,7 @@ export interface DeviceFoundEvent {
   ip: string;
   mac: string;
   hostname?: string;
+  vendor?: string;
   timestamp: number;
   ports: Port[];
 }
