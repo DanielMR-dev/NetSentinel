@@ -5,14 +5,12 @@ import { useScanStore } from '../../stores/scanStore';
 import { ScanLogs } from './ScanLogs';
 
 export const ScanProgress: React.FC = () => {
-  const {
-    isScanning,
-    isPaused,
-    scannedCount,
-    totalHosts,
-    currentTarget,
-    devices,
-  } = useScanStore();
+  const isScanning = useScanStore((s) => s.isScanning);
+  const isPaused = useScanStore((s) => s.isPaused);
+  const scannedCount = useScanStore((s) => s.scannedCount);
+  const totalHosts = useScanStore((s) => s.totalHosts);
+  const currentTarget = useScanStore((s) => s.currentTarget);
+  const devices = useScanStore((s) => s.devices);
 
   const progressPercent = useMemo(() => {
     if (totalHosts === 0) return 0;

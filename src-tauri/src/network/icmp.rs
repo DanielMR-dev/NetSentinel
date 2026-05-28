@@ -174,8 +174,11 @@ fn ping_host_blocking(ip: Ipv4Addr, timeout_ms: u64) -> Result<bool, ScanError> 
                     continue; // Packet too small
                 }
 
-                // Safety: we've received `size` bytes, so the first `size` elements
-                // are initialized. We convert to a slice of initialized bytes.
+                // SAFETY: `recv_from` returned `Ok((size, _))`, which guarantees that the
+                // first `size` elements of `recv_buf` have been initialized by the kernel.
+                // We only create a slice of exactly `size` elements, so no uninitialized
+                // memory is read. The `MaybeUninit<u8>` layout is identical to `u8` layout,
+                // making the pointer cast sound.
                 let recv_bytes = unsafe {
                     std::slice::from_raw_parts(recv_buf[0].as_ptr(), size)
                 };
@@ -384,7 +387,7 @@ pub async fn icmp_ping_sweep(
                 let ipv4 = match ip {
                     IpAddr::V4(v4) => v4,
                     IpAddr::V6(_) => {
-                        log::debug!("Skipping IPv6 address {} for ICMP sweep", ip_str);
+                        tracing::debug!("Skipping IPv6 address {} for ICMP sweep", ip_str);
                         return None;
                     }
                 };
@@ -433,11 +436,11 @@ pub async fn icmp_ping_sweep(
                         None
                     }
                     Ok(Err(e)) => {
-                        log::warn!("ICMP ping error for {}: {}", ip_str, e);
+                        tracing::warn!("ICMP ping error for {}: {}", ip_str, e);
                         None
                     }
                     Err(join_err) => {
-                        log::warn!("ICMP spawn_blocking join error for {}: {}", ip_str, join_err);
+                        tracing::warn!("ICMP spawn_blocking join error for {}: {}", ip_str, join_err);
                         None
                     }
                 };

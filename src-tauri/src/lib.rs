@@ -23,7 +23,7 @@ pub use state::SharedScanState;
 pub fn run() {
     let shared_state = Arc::new(SharedScanState::new());
 
-    tauri::Builder::default()
+    if let Err(e) = tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::default()
                 .level(log::LevelFilter::Info)
@@ -47,5 +47,8 @@ pub fn run() {
             get_default_settings,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    {
+        eprintln!("Fatal error starting NetSentinel: {}", e);
+        std::process::exit(1);
+    }
 }

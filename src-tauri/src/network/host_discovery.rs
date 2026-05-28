@@ -41,12 +41,17 @@ async fn emit_log(
     let _ = app.emit("scan_log", log_event);
 }
 
-/// Discover live hosts by TCP probing common ports
+/// Discover live hosts by TCP probing common ports.
+///
+/// Supports cancellation via the `cancel_rx` oneshot receiver. When cancelled,
+/// the entire stream is dropped (cancelling all in-flight TCP probes) and
+/// partial results collected so far are returned.
 pub async fn discover_hosts(
     ips: Vec<IpAddr>,
     app: Arc<tauri::AppHandle>,
-    _cancel_rx: tokio::sync::oneshot::Receiver<()>,
+    cancel_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<Vec<Device>, ScanError> {
+    let mut cancel_rx = cancel_rx;
     let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_HOSTS));
     let found_devices = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let total = ips.len() as u32;
@@ -63,93 +68,111 @@ pub async fn discover_hosts(
 
     emit_log(&app, "info", &format!("Starting host discovery for {} targets", total), None).await;
 
-    stream::iter(ips)
-        .map(|ip| {
-            let sem = semaphore.clone();
-            let app = app.clone();
-            let found = found_devices.clone();
-            let scanned = scanned.clone();
+    // Wrap the entire stream collection in tokio::select! so that cancellation
+    // drops the stream and all in-flight tasks immediately.
+    let result = tokio::select! {
+        _ = &mut cancel_rx => {
+            emit_log(&app, "warn", "Scan cancelled by user", None).await;
+            let partial = found_devices.lock().await.clone();
+            emit_log(
+                &app,
+                "info",
+                &format!(
+                    "Scan cancelled. {} devices found before cancellation",
+                    partial.len()
+                ),
+                None,
+            ).await;
+            return Ok(partial);
+        }
+        _results = stream::iter(ips)
+            .map(|ip| {
+                let sem = semaphore.clone();
+                let app = app.clone();
+                let found = found_devices.clone();
+                let scanned = scanned.clone();
 
-            async move {
-                let _permit = sem.acquire().await.ok();
+                async move {
+                    let _permit = sem.acquire().await.ok();
 
-                let current = scanned.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                    let current = scanned.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
 
-                // Update current target
-                let target_str = ip.to_string();
+                    // Update current target
+                    let target_str = ip.to_string();
 
-                // Emit log for debug purposes every N hosts
-                if current % PROGRESS_INTERVAL == 0 || current == 1 {
-                    emit_log(
-                        &app,
-                        "debug",
-                        &format!("Scanning {} ({}/{})", target_str, current, total),
-                        Some(&target_str),
-                    ).await;
-                }
-
-                // TCP probe to check if host is alive
-                let is_alive = check_host_alive(ip).await;
-
-                if is_alive {
-                    emit_log(
-                        &app,
-                        "info",
-                        &format!("Host found: {}", target_str),
-                        Some(&target_str),
-                    ).await;
-
-                    let mut device = Device::new(ip.to_string());
-                    device.status = DeviceStatus::Online;
-
-                    // Try to get MAC address from /proc/net/arp
-                    if let Some(mac) = get_mac_from_arp(&target_str).await {
-                        device.mac = mac;
+                    // Emit log for debug purposes every N hosts
+                    if current % PROGRESS_INTERVAL == 0 || current == 1 {
+                        emit_log(
+                            &app,
+                            "debug",
+                            &format!("Scanning {} ({}/{})", target_str, current, total),
+                            Some(&target_str),
+                        ).await;
                     }
-                    // If ARP lookup fails, leave mac as empty/unknown - do not fabricate
 
-                    found.lock().await.push(device.clone());
+                    // TCP probe to check if host is alive
+                    let is_alive = check_host_alive(ip).await;
 
-                    // Emit device found event with discovery method
-                    let event = DeviceFoundEvent {
-                        ip: device.ip.clone(),
-                        mac: device.mac.clone(),
-                        hostname: device.hostname.clone(),
-                        timestamp: chrono::Utc::now().timestamp(),
-                        ports: Vec::new(),
-                        discovery_method: "TcpProbe".to_string(),
-                    };
-                    let _ = app.emit("device_found", event);
+                    if is_alive {
+                        emit_log(
+                            &app,
+                            "info",
+                            &format!("Host found: {}", target_str),
+                            Some(&target_str),
+                        ).await;
+
+                        let mut device = Device::new(ip.to_string());
+                        device.status = DeviceStatus::Online;
+
+                        // Try to get MAC address from /proc/net/arp
+                        if let Some(mac) = get_mac_from_arp(&target_str).await {
+                            device.mac = mac;
+                        }
+                        // If ARP lookup fails, leave mac as empty/unknown - do not fabricate
+
+                        found.lock().await.push(device.clone());
+
+                        // Emit device found event with discovery method
+                        let event = DeviceFoundEvent {
+                            ip: device.ip.clone(),
+                            mac: device.mac.clone(),
+                            hostname: device.hostname.clone(),
+                            timestamp: chrono::Utc::now().timestamp(),
+                            ports: Vec::new(),
+                            discovery_method: "TcpProbe".to_string(),
+                        };
+                        let _ = app.emit("device_found", event);
+                    }
+
+                    // Emit progress every N hosts
+                    if current % PROGRESS_INTERVAL == 0 {
+                        let progress = ScanProgressEvent {
+                            scanned: current,
+                            total,
+                            current_target: target_str,
+                            devices_found: found.lock().await.len() as u32,
+                        };
+                        let _ = app.emit("scan_progress", progress);
+                    }
+
+                    Some(is_alive)
                 }
+            })
+            .buffer_unordered(MAX_CONCURRENT_HOSTS)
+            .filter_map(|r| async move { r })
+            .collect::<Vec<bool>>() => {
+            let result = found_devices.lock().await.clone();
+            emit_log(
+                &app,
+                "info",
+                &format!("Host discovery complete. Found {} devices", result.len()),
+                None,
+            ).await;
+            Ok(result)
+        }
+    };
 
-                // Emit progress every N hosts
-                if current % PROGRESS_INTERVAL == 0 {
-                    let progress = ScanProgressEvent {
-                        scanned: current,
-                        total,
-                        current_target: target_str,
-                        devices_found: found.lock().await.len() as u32,
-                    };
-                    let _ = app.emit("scan_progress", progress);
-                }
-
-                Some(is_alive)
-            }
-        })
-        .buffer_unordered(MAX_CONCURRENT_HOSTS)
-        .filter_map(|r| async move { r })
-        .collect::<Vec<bool>>()
-        .await;
-
-    let result = found_devices.lock().await.clone();
-    emit_log(
-        &app,
-        "info",
-        &format!("Host discovery complete. Found {} devices", result.len()),
-        None,
-    ).await;
-
-    Ok(result)
+    result
 }
 
 /// Get MAC address from the system ARP cache for a given IP.

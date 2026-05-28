@@ -47,7 +47,7 @@ pub async fn start_scan(
     emit_log(&app, "info", &format!("Scan target contains {} hosts", total_hosts), None).await;
 
     // Check if already running
-    if state.is_running().await {
+    if state.is_running() {
         emit_log(&app, "error", "Scan already in progress", None).await;
         return Err(ScanError::NetworkError("Scan already in progress".to_string()));
     }
@@ -55,7 +55,7 @@ pub async fn start_scan(
     // Reset state
     state.reset().await;
     state.set_total_hosts(total_hosts);
-    state.set_running(true).await;
+    state.set_running(true);
 
     // Create cancellation channel
     let (cancel_tx, cancel_rx) = oneshot::channel();
@@ -95,7 +95,7 @@ pub async fn start_scan(
                     status: "error".to_string(),
                 };
                 let _ = app_arc.emit("scan_complete", complete_event);
-                state_clone.set_running(false).await;
+                state_clone.set_running(false);
                 return;
             }
         };
@@ -145,7 +145,7 @@ pub async fn start_scan(
                 let _ = app_arc.emit("scan_complete", complete_event);
                 emit_log(&app_arc, "info", &format!("Scan completed in {}ms", duration), None).await;
 
-                state_clone.set_running(false).await;
+                state_clone.set_running(false);
                 return;
             }
             _ => {
@@ -186,6 +186,12 @@ pub async fn start_scan(
 
                 if scan_ports && !ports_to_scan.is_empty() {
                     for device in &devices {
+                        // Check for cancellation between devices
+                        if !state_clone.is_running() {
+                            emit_log(&app_arc, "warn", "Scan cancelled during port scanning", None).await;
+                            break;
+                        }
+
                         emit_log(
                             &app_arc,
                             "info",
@@ -228,22 +234,24 @@ pub async fn start_scan(
                 let duration = start_time.elapsed().as_millis() as u64;
                 let device_count = state_clone.get_devices().await.len() as u32;
 
+                let status = if state_clone.is_running() { "completed" } else { "cancelled" };
+
                 let complete_event = ScanCompleteEvent {
                     scan_id: scan_id_clone.clone(),
                     device_count,
                     duration_ms: duration,
-                    status: "completed".to_string(),
+                    status: status.to_string(),
                 };
                 let _ = app_arc.emit("scan_complete", complete_event);
 
                 emit_log(
                     &app_arc,
                     "info",
-                    &format!("Scan completed in {}ms. Found {} devices", duration, device_count),
+                    &format!("Scan {} in {}ms. Found {} devices", status, duration, device_count),
                     None,
                 ).await;
 
-                state_clone.set_running(false).await;
+                state_clone.set_running(false);
                 return;
             }
             Ok(_) => {
@@ -303,6 +311,12 @@ pub async fn start_scan(
                 // Scan ports for each discovered device
                 if scan_ports && !ports_to_scan.is_empty() {
                     for device in &devices {
+                        // Check for cancellation between devices
+                        if !state_clone.is_running() {
+                            emit_log(&app_arc, "warn", "Scan cancelled during port scanning", None).await;
+                            break;
+                        }
+
                         emit_log(
                             &app_arc,
                             "info",
@@ -349,23 +363,25 @@ pub async fn start_scan(
                 let duration = start_time.elapsed().as_millis() as u64;
                 let device_count = state_clone.get_devices().await.len() as u32;
 
+                let status = if state_clone.is_running() { "completed" } else { "cancelled" };
+
                 // Emit scan complete
                 let complete_event = ScanCompleteEvent {
                     scan_id: scan_id_clone.clone(),
                     device_count,
                     duration_ms: duration,
-                    status: "completed".to_string(),
+                    status: status.to_string(),
                 };
                 let _ = app_arc.emit("scan_complete", complete_event);
 
                 emit_log(
                     &app_arc,
                     "info",
-                    &format!("Scan completed in {}ms. Found {} devices", duration, device_count),
+                    &format!("Scan {} in {}ms. Found {} devices", status, duration, device_count),
                     None,
                 ).await;
 
-                state_clone.set_running(false).await;
+                state_clone.set_running(false);
             }
             Err(e) => {
                 emit_log(&app_arc, "error", &format!("Discovery failed: {}", e), None).await;
@@ -377,7 +393,7 @@ pub async fn start_scan(
                     status: "error".to_string(),
                 };
                 let _ = app_arc.emit("scan_complete", complete_event);
-                state_clone.set_running(false).await;
+                state_clone.set_running(false);
             }
         }
     });
@@ -396,13 +412,13 @@ pub async fn stop_scan(
 ) -> Result<(), ScanError> {
     emit_log(&app, "info", "Stop scan requested", None).await;
 
-    if !state.is_running().await {
+    if !state.is_running() {
         emit_log(&app, "warn", "No scan running to stop", None).await;
         return Err(ScanError::NotRunning);
     }
 
     state.set_cancelled().await;
-    state.set_running(false).await;
+    state.set_running(false);
 
     emit_log(&app, "info", "Scan stopped", None).await;
     Ok(())
@@ -416,12 +432,12 @@ pub async fn pause_scan(
 ) -> Result<(), ScanError> {
     emit_log(&app, "info", "Pause scan requested", None).await;
 
-    if !state.is_running().await {
+    if !state.is_running() {
         emit_log(&app, "warn", "No scan running to pause", None).await;
         return Err(ScanError::NotRunning);
     }
 
-    state.set_paused(true).await;
+    state.set_paused(true);
     emit_log(&app, "info", "Scan paused", None).await;
     Ok(())
 }
@@ -434,12 +450,12 @@ pub async fn resume_scan(
 ) -> Result<(), ScanError> {
     emit_log(&app, "info", "Resume scan requested", None).await;
 
-    if !state.is_running().await {
+    if !state.is_running() {
         emit_log(&app, "warn", "No scan running to resume", None).await;
         return Err(ScanError::NotRunning);
     }
 
-    state.set_paused(false).await;
+    state.set_paused(false);
     emit_log(&app, "info", "Scan resumed", None).await;
     Ok(())
 }

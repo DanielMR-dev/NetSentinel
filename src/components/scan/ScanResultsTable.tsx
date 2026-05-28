@@ -7,6 +7,35 @@ import type { Device } from '../../types/device';
 type SortField = 'ip' | 'mac' | 'hostname' | 'ports' | 'lastSeen';
 type SortDirection = 'asc' | 'desc';
 
+/** Compare two IPv4 addresses numerically by octet */
+function compareIPs(a: string, b: string): number {
+  const aParts = a.split('.').map(Number);
+  const bParts = b.split('.').map(Number);
+  for (let i = 0; i < 4; i++) {
+    const aOctet = aParts[i] ?? 0;
+    const bOctet = bParts[i] ?? 0;
+    if (aOctet !== bOctet) return aOctet - bOctet;
+  }
+  return 0;
+}
+
+interface SortIconProps {
+  field: SortField;
+  sortField: SortField;
+  sortDirection: SortDirection;
+}
+
+const SortIcon: React.FC<SortIconProps> = React.memo(({ field, sortField, sortDirection }) => (
+  <span className="ml-1 inline-block">
+    {sortField === field ? (
+      sortDirection === 'asc' ? '↑' : '↓'
+    ) : (
+      <span className="text-gray-600">↕</span>
+    )}
+  </span>
+));
+SortIcon.displayName = 'SortIcon';
+
 export const ScanResultsTable: React.FC = () => {
   const devices = useScanDevices();
   const selectedDeviceId = useScanStore((s) => s.selectedDeviceId);
@@ -24,13 +53,17 @@ export const ScanResultsTable: React.FC = () => {
     }
   }, [sortField]);
 
+  const handleSelectDevice = useCallback((ip: string) => {
+    selectDevice(ip);
+  }, [selectDevice]);
+
   const sortedDevices = useMemo(() => {
     const sorted = [...devices];
     sorted.sort((a, b) => {
       let comparison = 0;
       switch (sortField) {
         case 'ip':
-          comparison = a.ip.localeCompare(b.ip);
+          comparison = compareIPs(a.ip, b.ip);
           break;
         case 'mac':
           comparison = a.mac.localeCompare(b.mac);
@@ -49,16 +82,6 @@ export const ScanResultsTable: React.FC = () => {
     });
     return sorted;
   }, [devices, sortField, sortDirection]);
-
-  const SortIcon: React.FC<{ field: SortField }> = ({ field }) => (
-    <span className="ml-1 inline-block">
-      {sortField === field ? (
-        sortDirection === 'asc' ? '↑' : '↓'
-      ) : (
-        <span className="text-gray-600">↕</span>
-      )}
-    </span>
-  );
 
   return (
     <div className="h-full flex flex-col">
@@ -79,35 +102,35 @@ export const ScanResultsTable: React.FC = () => {
                 onClick={() => handleSort('ip')}
               >
                 IP Address
-                <SortIcon field="ip" />
+                <SortIcon field="ip" sortField={sortField} sortDirection={sortDirection} />
               </th>
               <th
                 className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-200"
                 onClick={() => handleSort('mac')}
               >
                 MAC Address
-                <SortIcon field="mac" />
+                <SortIcon field="mac" sortField={sortField} sortDirection={sortDirection} />
               </th>
               <th
                 className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-200"
                 onClick={() => handleSort('hostname')}
               >
                 Hostname
-                <SortIcon field="hostname" />
+                <SortIcon field="hostname" sortField={sortField} sortDirection={sortDirection} />
               </th>
               <th
                 className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-200"
                 onClick={() => handleSort('ports')}
               >
                 Open Ports
-                <SortIcon field="ports" />
+                <SortIcon field="ports" sortField={sortField} sortDirection={sortDirection} />
               </th>
               <th
                 className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-200"
                 onClick={() => handleSort('lastSeen')}
               >
                 Last Seen
-                <SortIcon field="lastSeen" />
+                <SortIcon field="lastSeen" sortField={sortField} sortDirection={sortDirection} />
               </th>
             </tr>
           </thead>
@@ -117,7 +140,7 @@ export const ScanResultsTable: React.FC = () => {
                 key={device.mac || device.ip}
                 device={device}
                 isSelected={selectedDeviceId === device.ip}
-                onSelect={() => selectDevice(device.ip)}
+                onSelect={handleSelectDevice}
               />
             ))}
           </tbody>
@@ -136,15 +159,22 @@ export const ScanResultsTable: React.FC = () => {
 interface DeviceRowProps {
   device: Device;
   isSelected: boolean;
-  onSelect: () => void;
+  onSelect: (ip: string) => void;
 }
 
-const DeviceRow: React.FC<DeviceRowProps> = ({ device, isSelected, onSelect }) => {
-  const openPortCount = device.ports.filter((p) => p.state === 'open').length;
+const DeviceRow: React.FC<DeviceRowProps> = React.memo(({ device, isSelected, onSelect }) => {
+  const openPortCount = useMemo(
+    () => device.ports.filter((p) => p.state === 'open').length,
+    [device.ports]
+  );
+
+  const handleClick = useCallback(() => {
+    onSelect(device.ip);
+  }, [onSelect, device.ip]);
 
   return (
     <tr
-      onClick={onSelect}
+      onClick={handleClick}
       className={twMerge(
         clsx(
           'cursor-pointer transition-colors',
@@ -189,4 +219,5 @@ const DeviceRow: React.FC<DeviceRowProps> = ({ device, isSelected, onSelect }) =
       </td>
     </tr>
   );
-};
+});
+DeviceRow.displayName = 'DeviceRow';

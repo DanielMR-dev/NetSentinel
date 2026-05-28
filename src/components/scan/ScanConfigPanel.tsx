@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useScanStore } from '../../stores/scanStore';
@@ -6,33 +6,82 @@ import { useCapabilitiesStore } from '../../stores/capabilitiesStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { Button } from '../common/Button';
 
-// Common port groups for quick selection
-const PORT_PRESETS = {
+// Common ports with service labels for the chip UI
+const COMMON_PORTS: { port: number; label: string }[] = [
+  { port: 21, label: 'FTP' },
+  { port: 22, label: 'SSH' },
+  { port: 23, label: 'Telnet' },
+  { port: 25, label: 'SMTP' },
+  { port: 53, label: 'DNS' },
+  { port: 80, label: 'HTTP' },
+  { port: 110, label: 'POP3' },
+  { port: 143, label: 'IMAP' },
+  { port: 443, label: 'HTTPS' },
+  { port: 445, label: 'SMB' },
+  { port: 993, label: 'IMAPS' },
+  { port: 995, label: 'POP3S' },
+  { port: 3306, label: 'MySQL' },
+  { port: 3389, label: 'RDP' },
+  { port: 5432, label: 'PgSQL' },
+  { port: 5900, label: 'VNC' },
+  { port: 6379, label: 'Redis' },
+  { port: 8080, label: '8080' },
+  { port: 8443, label: '8443' },
+];
+
+// Port groups for preset buttons
+const PORT_PRESETS: Record<string, number[]> = {
   common: [21, 22, 23, 25, 53, 80, 110, 143, 443, 445, 993, 995, 3306, 3389, 5432, 5900],
   web: [80, 443, 8080, 8443],
   database: [3306, 5432, 6379, 27017],
 };
 
+/** Parse a port range string like "8000-8100" or single port "8080" into an array of port numbers */
+function parsePortInput(input: string): number[] {
+  const trimmed = input.trim();
+  if (!trimmed) return [];
+
+  const rangeMatch = trimmed.match(/^(\d+)\s*-\s*(\d+)$/);
+  if (rangeMatch) {
+    const start = Number(rangeMatch[1]);
+    const end = Number(rangeMatch[2]);
+    if (
+      Number.isNaN(start) || Number.isNaN(end) ||
+      start < 1 || end > 65535 || start > end ||
+      end - start > 1000
+    ) {
+      return [];
+    }
+    const ports: number[] = [];
+    for (let p = start; p <= end; p++) {
+      ports.push(p);
+    }
+    return ports;
+  }
+
+  const single = Number(trimmed);
+  if (Number.isNaN(single) || single < 1 || single > 65535) return [];
+  return [single];
+}
+
 export const ScanConfigPanel: React.FC = () => {
-  const {
-    cidr,
-    setCidr,
-    scanPorts,
-    setScanPorts,
-    selectedPorts,
-    setSelectedPorts,
-    timeoutMs,
-    setTimeoutMs,
-    isScanning,
-    isPaused,
-    startScan,
-    stopScan,
-    pauseScan,
-    resumeScan,
-    scanStatus,
-    error,
-    clearError,
-  } = useScanStore();
+  const cidr = useScanStore((s) => s.cidr);
+  const setCidr = useScanStore((s) => s.setCidr);
+  const scanPorts = useScanStore((s) => s.scanPorts);
+  const setScanPorts = useScanStore((s) => s.setScanPorts);
+  const selectedPorts = useScanStore((s) => s.selectedPorts);
+  const setSelectedPorts = useScanStore((s) => s.setSelectedPorts);
+  const timeoutMs = useScanStore((s) => s.timeoutMs);
+  const setTimeoutMs = useScanStore((s) => s.setTimeoutMs);
+  const isScanning = useScanStore((s) => s.isScanning);
+  const isPaused = useScanStore((s) => s.isPaused);
+  const startScan = useScanStore((s) => s.startScan);
+  const stopScan = useScanStore((s) => s.stopScan);
+  const pauseScan = useScanStore((s) => s.pauseScan);
+  const resumeScan = useScanStore((s) => s.resumeScan);
+  const scanStatus = useScanStore((s) => s.scanStatus);
+  const error = useScanStore((s) => s.error);
+  const clearError = useScanStore((s) => s.clearError);
 
   const capabilities = useCapabilitiesStore((s) => s.capabilities);
   const discoveryMethods = useSettingsStore((s) => s.settings.scanConfig.discoveryMethods);
@@ -46,42 +95,84 @@ export const ScanConfigPanel: React.FC = () => {
   }, [capabilities, discoveryMethods]);
 
   const [showPortSelector, setShowPortSelector] = useState(false);
+  const [customPortInput, setCustomPortInput] = useState('');
 
-  const handleCidrChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const selectedPortsSet = useMemo(() => new Set(selectedPorts), [selectedPorts]);
+
+  // Ports that are selected but not in the COMMON_PORTS list (custom ports)
+  const customSelectedPorts = useMemo(() => {
+    const commonPortNumbers = new Set(COMMON_PORTS.map((c) => c.port));
+    return selectedPorts.filter((p) => !commonPortNumbers.has(p)).sort((a, b) => a - b);
+  }, [selectedPorts]);
+
+  const handleCidrChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setCidr(e.target.value);
-  };
+  }, [setCidr]);
 
-  const handleTimeoutChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleTimeoutChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setTimeoutMs(Number(e.target.value));
-  };
+  }, [setTimeoutMs]);
 
-  const handlePresetClick = (preset: keyof typeof PORT_PRESETS) => {
-    setSelectedPorts(PORT_PRESETS[preset]);
-  };
-
-  const handleTogglePort = (port: number) => {
-    if (selectedPorts.includes(port)) {
-      setSelectedPorts(selectedPorts.filter((p) => p !== port));
-    } else {
-      setSelectedPorts([...selectedPorts, port].sort((a, b) => a - b));
+  const handlePresetClick = useCallback((preset: string) => {
+    const ports = PORT_PRESETS[preset];
+    if (ports) {
+      setSelectedPorts(ports);
     }
-  };
+  }, [setSelectedPorts]);
 
-  const handleStartStop = () => {
+  const handleTogglePort = useCallback((port: number) => {
+    const current = useScanStore.getState().selectedPorts;
+    if (current.includes(port)) {
+      setSelectedPorts(current.filter((p) => p !== port));
+    } else {
+      setSelectedPorts([...current, port].sort((a, b) => a - b));
+    }
+  }, [setSelectedPorts]);
+
+  const handleRemovePort = useCallback((port: number) => {
+    const current = useScanStore.getState().selectedPorts;
+    setSelectedPorts(current.filter((p) => p !== port));
+  }, [setSelectedPorts]);
+
+  const handleAddCustomPort = useCallback(() => {
+    const parsed = parsePortInput(customPortInput);
+    if (parsed.length === 0) return;
+    const current = useScanStore.getState().selectedPorts;
+    const existing = new Set(current);
+    const merged = [...current];
+    for (const p of parsed) {
+      if (!existing.has(p)) {
+        merged.push(p);
+        existing.add(p);
+      }
+    }
+    merged.sort((a, b) => a - b);
+    setSelectedPorts(merged);
+    setCustomPortInput('');
+  }, [customPortInput, setSelectedPorts]);
+
+  const handleCustomPortKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAddCustomPort();
+    }
+  }, [handleAddCustomPort]);
+
+  const handleStartStop = useCallback(() => {
     if (isScanning || isPaused) {
       stopScan();
     } else {
       startScan();
     }
-  };
+  }, [isScanning, isPaused, stopScan, startScan]);
 
-  const handlePauseResume = () => {
+  const handlePauseResume = useCallback(() => {
     if (isPaused) {
       resumeScan();
     } else {
       pauseScan();
     }
-  };
+  }, [isPaused, resumeScan, pauseScan]);
 
   return (
     <div className="bg-gradient-to-b from-gray-800 to-gray-800/95 rounded-2xl border border-gray-700/50 shadow-card p-5">
@@ -178,29 +269,33 @@ export const ScanConfigPanel: React.FC = () => {
           </button>
 
           {showPortSelector && (
-            <div className="absolute top-full left-0 mt-2 w-80 bg-gradient-to-b from-gray-800 to-gray-800/95 border border-gray-700/50 rounded-xl shadow-xl z-10 p-4">
+            <div className="absolute top-full left-0 mt-2 w-96 bg-gradient-to-b from-gray-800 to-gray-800/95 border border-gray-700/50 rounded-xl shadow-xl z-10 p-4">
+              {/* Preset buttons */}
               <div className="flex gap-2 mb-3">
-                {Object.entries(PORT_PRESETS).map(([name]) => (
+                {Object.keys(PORT_PRESETS).map((name) => (
                   <button
                     key={name}
-                    onClick={() => handlePresetClick(name as keyof typeof PORT_PRESETS)}
-                    className="px-3 py-1.5 text-xs bg-gray-700 hover:bg-gray-600 rounded-lg text-gray-300 font-medium transition-colors"
+                    type="button"
+                    onClick={() => handlePresetClick(name)}
+                    className="px-3 py-1.5 text-xs bg-gray-700 hover:bg-gray-600 rounded-lg text-gray-300 font-medium capitalize transition-colors"
                   >
                     {name}
                   </button>
                 ))}
               </div>
-              <div className="grid grid-cols-8 gap-1 max-h-48 overflow-y-auto">
-                {[...Array(1024)].map((_, i) => {
-                  const port = i + 1;
-                  const isSelected = selectedPorts.includes(port);
+
+              {/* Common port chips */}
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {COMMON_PORTS.map(({ port, label }) => {
+                  const isSelected = selectedPortsSet.has(port);
                   return (
                     <button
                       key={port}
+                      type="button"
                       onClick={() => handleTogglePort(port)}
                       className={twMerge(
                         clsx(
-                          'text-xs p-1.5 rounded-lg text-center transition-all duration-150',
+                          'px-2 py-1 rounded-lg text-xs font-medium transition-all duration-150',
                           'hover:scale-105 active:scale-95',
                           isSelected
                             ? 'bg-gradient-to-b from-blue-600 to-blue-700 text-white shadow-md'
@@ -208,11 +303,73 @@ export const ScanConfigPanel: React.FC = () => {
                         )
                       )}
                     >
-                      {port}
+                      {port} {label}
                     </button>
                   );
                 })}
               </div>
+
+              {/* Custom port input */}
+              <div className="flex gap-2 mb-3">
+                <input
+                  type="text"
+                  value={customPortInput}
+                  onChange={(e) => setCustomPortInput(e.target.value)}
+                  onKeyDown={handleCustomPortKeyDown}
+                  placeholder="e.g. 8080 or 8000-8100"
+                  className={twMerge(
+                    clsx(
+                      'flex-1 px-3 py-1.5 bg-gray-900/80 border border-gray-600/50 rounded-lg',
+                      'text-gray-100 text-xs placeholder-gray-500',
+                      'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+                    )
+                  )}
+                />
+                <button
+                  type="button"
+                  onClick={handleAddCustomPort}
+                  className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
+                >
+                  Add
+                </button>
+              </div>
+
+              {/* Selected ports as removable chips */}
+              {selectedPorts.length > 0 && (
+                <div>
+                  <div className="text-xs text-gray-500 mb-1.5 font-medium">
+                    Selected ({selectedPorts.length}):
+                  </div>
+                  <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+                    {customSelectedPorts.map((port) => (
+                      <span
+                        key={port}
+                        className={twMerge(
+                          clsx(
+                            'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium',
+                            'bg-blue-900/50 text-blue-300 border border-blue-700/50'
+                          )
+                        )}
+                      >
+                        {port}
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePort(port)}
+                          className="text-blue-400 hover:text-blue-200 transition-colors"
+                          aria-label={`Remove port ${port}`}
+                        >
+                          &times;
+                        </button>
+                      </span>
+                    ))}
+                    {customSelectedPorts.length === 0 && (
+                      <span className="text-xs text-gray-500 italic">
+                        Toggle ports above or add custom ones
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

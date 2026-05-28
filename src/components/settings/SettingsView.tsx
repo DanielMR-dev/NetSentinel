@@ -92,7 +92,10 @@ const TabErrorFallback: React.FC<{ tabName: string }> = ({ tabName }) => (
 );
 
 export const SettingsView: React.FC = () => {
-  const { fetchProfiles, isLoading, error, clearError } = useSettingsStore();
+  const fetchProfiles = useSettingsStore((s) => s.fetchProfiles);
+  const isLoading = useSettingsStore((s) => s.isLoading);
+  const error = useSettingsStore((s) => s.error);
+  const clearError = useSettingsStore((s) => s.clearError);
   const [activeTab, setActiveTab] = useState<TabId>('scan');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
@@ -250,22 +253,6 @@ export const SettingsView: React.FC = () => {
         )}
       </div>
 
-      {/* CSS for toast animation */}
-      <style>{`
-        @keyframes slide-in {
-          from {
-            transform: translateX(100%);
-            opacity: 0;
-          }
-          to {
-            transform: translateX(0);
-            opacity: 1;
-          }
-        }
-        .animate-slide-in {
-          animation: slide-in 0.3s ease-out;
-        }
-      `}</style>
     </div>
   );
 };

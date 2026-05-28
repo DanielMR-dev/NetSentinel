@@ -8,7 +8,8 @@ import { SettingsView } from './components/settings/SettingsView';
 import { PrivilegeBanner } from './components/common/PrivilegeBanner';
 
 export function App() {
-  const { activeTab, setActiveTab } = useDashboardStore();
+  const activeTab = useDashboardStore((s) => s.activeTab);
+  const setActiveTab = useDashboardStore((s) => s.setActiveTab);
   const fetchCapabilities = useCapabilitiesStore((s) => s.fetchCapabilities);
 
   // Fetch platform capabilities once on app mount
@@ -20,7 +21,14 @@ export function App() {
     <div className="min-h-screen bg-gray-900 text-gray-100">
       <header className="border-b border-gray-800 px-6 py-4">
         <nav className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-blue-500">NetSentinel</h1>
+          <div className="flex items-center gap-3">
+            <img
+              src="/netSentinel-logo.png"
+              alt="NetSentinel logo"
+              className="w-10 h-10 rounded-lg"
+            />
+            <h1 className="text-2xl font-bold text-blue-500">NetSentinel</h1>
+          </div>
         </nav>
       </header>
       <PrivilegeBanner />

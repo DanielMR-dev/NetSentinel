@@ -8,7 +8,8 @@ import { ScanResultsTable } from './ScanResultsTable';
 import { DeviceDetailPanel } from './DeviceDetailPanel';
 
 export const ScanView: React.FC = () => {
-  const { devices, selectedDeviceId } = useScanStore();
+  const devices = useScanStore((s) => s.devices);
+  const selectedDeviceId = useScanStore((s) => s.selectedDeviceId);
 
   useEffect(() => {
     setupScanEventListeners();

@@ -88,14 +88,14 @@ pub async fn get_platform_capabilities() -> Result<PlatformCapabilities, Command
     let arp_provider = platform::create_arp_provider();
     match arp_provider.read_arp_table().await {
         Ok(entries) => {
-            log::info!(
+            tracing::info!(
                 "ARP table readable: {} entries found",
                 entries.len()
             );
             capabilities.push("arp_scan".to_string());
         }
         Err(e) => {
-            log::warn!(
+            tracing::warn!(
                 "ARP table read failed (capability still advertised): {}",
                 e
             );
@@ -109,12 +109,12 @@ pub async fn get_platform_capabilities() -> Result<PlatformCapabilities, Command
     // ── ICMP ping: requires elevated privileges ─────────────────────────
     let is_elevated = match icmp::check_icmp_privileges() {
         Ok(()) => {
-            log::info!("ICMP privileges confirmed — icmp_ping available");
+            tracing::info!("ICMP privileges confirmed — icmp_ping available");
             capabilities.push("icmp_ping".to_string());
             true
         }
         Err(e) => {
-            log::info!("ICMP privileges unavailable: {}", e);
+            tracing::info!("ICMP privileges unavailable: {}", e);
 
             let warning = match platform.as_str() {
                 "linux" => concat!(
@@ -140,7 +140,7 @@ pub async fn get_platform_capabilities() -> Result<PlatformCapabilities, Command
         }
     };
 
-    log::info!(
+    tracing::info!(
         "Platform capabilities detected: platform={}, elevated={}, capabilities={:?}, warnings={:?}",
         platform,
         is_elevated,

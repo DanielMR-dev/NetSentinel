@@ -1,17 +1,21 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use tokio::sync::Mutex;
 
 use crate::types::Device;
 
-/// Shared scan state that can be accessed from multiple commands
+/// Shared scan state that can be accessed from multiple commands.
+///
+/// Boolean flags (`is_paused`, `is_running`) use `AtomicBool` for lock-free,
+/// non-blocking reads. Complex state (`devices`, `cancel_tx`, `current_target`)
+/// uses `tokio::sync::Mutex` to avoid holding guards across `.await` points.
 pub struct SharedScanState {
     pub devices: Arc<Mutex<HashMap<String, Device>>>,
     pub scanned_count: Arc<AtomicU32>,
     pub total_hosts: Arc<AtomicU32>,
-    pub is_paused: Arc<Mutex<bool>>,
-    pub is_running: Arc<Mutex<bool>>,
+    pub is_paused: AtomicBool,
+    pub is_running: AtomicBool,
     pub cancel_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
     pub current_target: Arc<Mutex<Option<String>>>,
 }
@@ -28,8 +32,8 @@ impl SharedScanState {
             devices: Arc::new(Mutex::new(HashMap::new())),
             scanned_count: Arc::new(AtomicU32::new(0)),
             total_hosts: Arc::new(AtomicU32::new(0)),
-            is_paused: Arc::new(Mutex::new(false)),
-            is_running: Arc::new(Mutex::new(false)),
+            is_paused: AtomicBool::new(false),
+            is_running: AtomicBool::new(false),
             cancel_tx: Arc::new(Mutex::new(None)),
             current_target: Arc::new(Mutex::new(None)),
         }
@@ -39,8 +43,8 @@ impl SharedScanState {
         self.devices.lock().await.clear();
         self.scanned_count.store(0, Ordering::SeqCst);
         self.total_hosts.store(0, Ordering::SeqCst);
-        *self.is_paused.lock().await = false;
-        *self.is_running.lock().await = false;
+        self.is_paused.store(false, Ordering::SeqCst);
+        self.is_running.store(false, Ordering::SeqCst);
         *self.cancel_tx.lock().await = None;
         *self.current_target.lock().await = None;
     }
@@ -80,20 +84,20 @@ impl SharedScanState {
         *self.current_target.lock().await = target;
     }
 
-    pub async fn set_paused(&self, paused: bool) {
-        *self.is_paused.lock().await = paused;
+    pub fn set_paused(&self, paused: bool) {
+        self.is_paused.store(paused, Ordering::SeqCst);
     }
 
-    pub async fn is_paused(&self) -> bool {
-        *self.is_paused.lock().await
+    pub fn is_paused(&self) -> bool {
+        self.is_paused.load(Ordering::SeqCst)
     }
 
-    pub async fn is_running(&self) -> bool {
-        *self.is_running.lock().await
+    pub fn is_running(&self) -> bool {
+        self.is_running.load(Ordering::SeqCst)
     }
 
-    pub async fn set_running(&self, running: bool) {
-        *self.is_running.lock().await = running;
+    pub fn set_running(&self, running: bool) {
+        self.is_running.store(running, Ordering::SeqCst);
     }
 
     pub async fn set_cancel_tx(&self, tx: tokio::sync::oneshot::Sender<()>) {
