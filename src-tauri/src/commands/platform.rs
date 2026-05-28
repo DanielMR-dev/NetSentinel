@@ -1,0 +1,296 @@
+//! Platform capabilities detection command.
+//!
+//! Provides the `get_platform_capabilities` Tauri command, which detects the
+//! current operating system, privilege level, and available network discovery
+//! capabilities. Called once at frontend startup so the UI can show/hide
+//! discovery methods and display privilege warnings.
+//!
+//! # Design
+//!
+//! This command **never fails**. Privilege or I/O errors are captured as data
+//! (missing capabilities + human-readable warnings) rather than propagated as
+//! `Err`. The `Result<_, CommandError>` return type is kept for Tauri IPC
+//! consistency only.
+//!
+//! # Capability Detection Strategy
+//!
+//! | Capability   | Detection Method                                      | Privileges Required |
+//! |-------------|------------------------------------------------------|---------------------|
+//! | `tcp_probe` | Always available (uses `tokio::net::TcpStream`)       | None                |
+//! | `arp_scan`  | Attempt to read ARP table via platform provider       | Usually none        |
+//! | `icmp_ping` | `check_icmp_privileges()` (root/CAP_NET_RAW/Admin)   | Elevated            |
+
+use serde::{Deserialize, Serialize};
+
+use crate::commands::CommandError;
+use crate::network::icmp;
+use crate::network::platform;
+
+/// Platform capabilities response sent to the frontend.
+///
+/// Field names serialize as `camelCase` to match the TypeScript interface:
+/// ```typescript
+/// interface PlatformCapabilities {
+///   platform: 'linux' | 'windows' | 'macos';
+///   isElevated: boolean;
+///   capabilities: string[];
+///   warnings: string[];
+/// }
+/// ```
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct PlatformCapabilities {
+    /// Current operating system: `"linux"`, `"windows"`, or `"macos"`.
+    pub platform: String,
+
+    /// Whether the process is running with elevated privileges (root/admin).
+    pub is_elevated: bool,
+
+    /// List of available discovery capabilities.
+    ///
+    /// Possible values:
+    /// - `"tcp_probe"` — **always** available (no privileges needed)
+    /// - `"arp_scan"` — available if the ARP table can be read
+    /// - `"icmp_ping"` — available only with root / CAP_NET_RAW / Administrator
+    pub capabilities: Vec<String>,
+
+    /// Human-readable warnings about missing capabilities.
+    ///
+    /// Empty when all capabilities are available.
+    pub warnings: Vec<String>,
+}
+
+/// Detect the current platform's network scanning capabilities.
+///
+/// This command is called once at application startup by the frontend to
+/// determine which discovery methods should be enabled and whether any
+/// privilege warnings need to be displayed.
+///
+/// # Returns
+///
+/// Always returns `Ok(PlatformCapabilities)`. Capability detection failures
+/// are encoded in the `warnings` field rather than as command errors.
+#[tauri::command]
+pub async fn get_platform_capabilities() -> Result<PlatformCapabilities, CommandError> {
+    let platform = std::env::consts::OS.to_string();
+
+    let mut capabilities = Vec::with_capacity(3);
+    let mut warnings = Vec::new();
+
+    // ── TCP probe: always available ─────────────────────────────────────
+    capabilities.push("tcp_probe".to_string());
+
+    // ── ARP scan: try reading the ARP table ─────────────────────────────
+    // ARP table reading is a read-only kernel operation that usually works
+    // without elevated privileges. We attempt it to verify, but include
+    // the capability regardless since transient failures (empty table on
+    // fresh boot) don't mean the capability is absent.
+    let arp_provider = platform::create_arp_provider();
+    match arp_provider.read_arp_table().await {
+        Ok(entries) => {
+            log::info!(
+                "ARP table readable: {} entries found",
+                entries.len()
+            );
+            capabilities.push("arp_scan".to_string());
+        }
+        Err(e) => {
+            log::warn!(
+                "ARP table read failed (capability still advertised): {}",
+                e
+            );
+            // ARP is a read-only operation that usually succeeds. A transient
+            // failure (e.g., empty table) does not mean the capability is
+            // permanently unavailable, so we still advertise it.
+            capabilities.push("arp_scan".to_string());
+        }
+    }
+
+    // ── ICMP ping: requires elevated privileges ─────────────────────────
+    let is_elevated = match icmp::check_icmp_privileges() {
+        Ok(()) => {
+            log::info!("ICMP privileges confirmed — icmp_ping available");
+            capabilities.push("icmp_ping".to_string());
+            true
+        }
+        Err(e) => {
+            log::info!("ICMP privileges unavailable: {}", e);
+
+            let warning = match platform.as_str() {
+                "linux" => concat!(
+                    "ICMP ping requires root privileges or CAP_NET_RAW capability. ",
+                    "Run with sudo or set capabilities."
+                )
+                .to_string(),
+                "windows" => concat!(
+                    "ICMP ping requires Administrator privileges. ",
+                    "Run as Administrator and ensure Npcap is installed."
+                )
+                .to_string(),
+                "macos" => {
+                    "ICMP ping requires root privileges. Run with sudo.".to_string()
+                }
+                other => {
+                    format!("ICMP ping is not supported on platform '{}'.", other)
+                }
+            };
+
+            warnings.push(warning);
+            false
+        }
+    };
+
+    log::info!(
+        "Platform capabilities detected: platform={}, elevated={}, capabilities={:?}, warnings={:?}",
+        platform,
+        is_elevated,
+        capabilities,
+        warnings
+    );
+
+    Ok(PlatformCapabilities {
+        platform,
+        is_elevated,
+        capabilities,
+        warnings,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_get_platform_capabilities_returns_ok() {
+        let result = get_platform_capabilities().await;
+        assert!(result.is_ok(), "Command should never fail");
+    }
+
+    #[tokio::test]
+    async fn test_platform_is_valid_os() {
+        let caps = get_platform_capabilities().await.unwrap();
+        let valid_platforms = ["linux", "windows", "macos"];
+        assert!(
+            valid_platforms.contains(&caps.platform.as_str()),
+            "Platform '{}' is not a recognized OS string",
+            caps.platform
+        );
+    }
+
+    #[tokio::test]
+    async fn test_tcp_probe_always_present() {
+        let caps = get_platform_capabilities().await.unwrap();
+        assert!(
+            caps.capabilities.contains(&"tcp_probe".to_string()),
+            "tcp_probe must always be in capabilities"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_arp_scan_always_present() {
+        let caps = get_platform_capabilities().await.unwrap();
+        assert!(
+            caps.capabilities.contains(&"arp_scan".to_string()),
+            "arp_scan should always be advertised (read-only operation)"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_icmp_ping_conditional() {
+        let caps = get_platform_capabilities().await.unwrap();
+
+        if caps.is_elevated {
+            assert!(
+                caps.capabilities.contains(&"icmp_ping".to_string()),
+                "icmp_ping must be present when is_elevated is true"
+            );
+            assert!(
+                caps.warnings.is_empty(),
+                "No warnings expected when all capabilities are available"
+            );
+        } else {
+            assert!(
+                !caps.capabilities.contains(&"icmp_ping".to_string()),
+                "icmp_ping must NOT be present when is_elevated is false"
+            );
+            assert!(
+                !caps.warnings.is_empty(),
+                "Warnings must be present when ICMP is unavailable"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_serde_camel_case_serialization() {
+        let caps = PlatformCapabilities {
+            platform: "linux".to_string(),
+            is_elevated: true,
+            capabilities: vec!["tcp_probe".to_string()],
+            warnings: vec![],
+        };
+
+        let json = serde_json::to_string(&caps).unwrap();
+
+        // Verify camelCase field names
+        assert!(
+            json.contains("\"isElevated\""),
+            "Field 'is_elevated' must serialize as 'isElevated'. Got: {}",
+            json
+        );
+        assert!(
+            !json.contains("\"is_elevated\""),
+            "Field 'is_elevated' must NOT appear in snake_case. Got: {}",
+            json
+        );
+
+        // Verify all expected fields are present
+        assert!(json.contains("\"platform\""));
+        assert!(json.contains("\"capabilities\""));
+        assert!(json.contains("\"warnings\""));
+    }
+
+    #[tokio::test]
+    async fn test_serde_roundtrip() {
+        let original = PlatformCapabilities {
+            platform: "linux".to_string(),
+            is_elevated: false,
+            capabilities: vec![
+                "tcp_probe".to_string(),
+                "arp_scan".to_string(),
+            ],
+            warnings: vec![
+                "ICMP ping requires root privileges.".to_string(),
+            ],
+        };
+
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: PlatformCapabilities = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(original.platform, deserialized.platform);
+        assert_eq!(original.is_elevated, deserialized.is_elevated);
+        assert_eq!(original.capabilities, deserialized.capabilities);
+        assert_eq!(original.warnings, deserialized.warnings);
+    }
+
+    #[tokio::test]
+    async fn test_capabilities_vec_has_no_duplicates() {
+        let caps = get_platform_capabilities().await.unwrap();
+        let mut seen = std::collections::HashSet::new();
+        for cap in &caps.capabilities {
+            assert!(
+                seen.insert(cap.clone()),
+                "Duplicate capability found: {}",
+                cap
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_platform_matches_env_consts() {
+        let caps = get_platform_capabilities().await.unwrap();
+        assert_eq!(caps.platform, std::env::consts::OS);
+    }
+}

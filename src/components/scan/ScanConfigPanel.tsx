@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useScanStore } from '../../stores/scanStore';
+import { useCapabilitiesStore } from '../../stores/capabilitiesStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { Button } from '../common/Button';
 
 // Common port groups for quick selection
@@ -31,6 +33,17 @@ export const ScanConfigPanel: React.FC = () => {
     error,
     clearError,
   } = useScanStore();
+
+  const capabilities = useCapabilitiesStore((s) => s.capabilities);
+  const discoveryMethods = useSettingsStore((s) => s.settings.scanConfig.discoveryMethods);
+
+  // Check if ICMP is configured but unavailable
+  const icmpUnavailable = useMemo(() => {
+    if (capabilities === null) return false;
+    const icmpConfigured = discoveryMethods.includes('icmp');
+    const icmpAvailable = capabilities.capabilities.includes('icmp_ping');
+    return icmpConfigured && !icmpAvailable;
+  }, [capabilities, discoveryMethods]);
 
   const [showPortSelector, setShowPortSelector] = useState(false);
 
@@ -289,6 +302,33 @@ export const ScanConfigPanel: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      {/* ICMP Unavailable Warning */}
+      {icmpUnavailable && (
+        <div
+          role="status"
+          className="mt-3 flex items-center gap-2 px-3 py-2 bg-amber-900/20 border border-amber-700/30 rounded-lg"
+        >
+          <svg
+            className="w-4 h-4 text-amber-400 flex-shrink-0"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 9v2m0 4h.01M10.29 3.86l-8.58 14.86A1 1 0 002.58 20h18.84a1 1 0 00.87-1.5L13.71 3.86a1 1 0 00-1.72 0z"
+            />
+          </svg>
+          <span className="text-xs text-amber-300">
+            ICMP ping is enabled in settings but unavailable without elevated privileges.
+            Discovery will fall back to available methods.
+          </span>
+        </div>
+      )}
 
       {/* Scan Status Display */}
       {isScanning && (

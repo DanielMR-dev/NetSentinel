@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 pub use commands::{
     get_device_info, get_network_info, start_scan, stop_scan, pause_scan, resume_scan,
-    get_scan_results, CommandError, DeviceInfo, NetworkInfo,
+    get_scan_results, get_platform_capabilities, CommandError, DeviceInfo, NetworkInfo,
 };
 pub use commands::settings::{
     get_settings_profiles, save_profile, delete_profile, load_settings, save_settings,
@@ -33,6 +33,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_device_info,
             get_network_info,
+            get_platform_capabilities,
             start_scan,
             stop_scan,
             pause_scan,

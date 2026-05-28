@@ -1,5 +1,6 @@
 mod device;
 pub mod network;
+pub mod platform;
 pub mod scan;
 pub mod settings;
 
@@ -57,6 +58,9 @@ pub use device::get_device_info;
 
 // Re-export network commands
 pub use network::get_network_info;
+
+// Re-export platform capabilities command
+pub use platform::get_platform_capabilities;
 
 // Re-export scan commands
 pub use scan::{start_scan, stop_scan, pause_scan, resume_scan, get_scan_results};

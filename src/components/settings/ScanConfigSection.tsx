@@ -2,6 +2,7 @@ import React, { useState, useCallback, useMemo } from 'react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useCapabilitiesStore } from '../../stores/capabilitiesStore';
 import { Toggle } from '../common/Toggle';
 import { SettingsCard, SettingsSection } from './SettingsCard';
 import {
@@ -11,6 +12,7 @@ import {
   createDefaultScanConfig,
   type ScanConfig,
 } from '../../types/settings';
+import { DISCOVERY_CAPABILITY_MAP } from '../../types/platform';
 
 const DISCOVERY_METHODS = [
   { id: 'arp', label: 'ARP Discovery', description: 'Local network ARP lookup' },
@@ -31,6 +33,18 @@ const PORT_GROUPS = {
 
 export const ScanConfigSection: React.FC = () => {
   const { settings, updateScanConfig, saveSettings, isSaving } = useSettingsStore();
+  const capabilities = useCapabilitiesStore((s) => s.capabilities);
+
+  // Memoized helper to check if a discovery method is available
+  const isMethodAvailable = useCallback(
+    (methodId: string): boolean => {
+      if (capabilities === null) return true; // assume available before load
+      const requiredCap = DISCOVERY_CAPABILITY_MAP[methodId];
+      if (requiredCap === undefined) return true;
+      return capabilities.capabilities.includes(requiredCap);
+    },
+    [capabilities]
+  );
 
   // Safe access to scanConfig with fallback to defaults
   const scanConfig = useMemo<ScanConfig>(() => {
@@ -425,15 +439,49 @@ export const ScanConfigSection: React.FC = () => {
         {/* Discovery Methods */}
         <SettingsSection title="Discovery Methods" description="Methods used to discover devices on the network">
           <div className="space-y-3">
-            {DISCOVERY_METHODS.map((method) => (
-              <Toggle
-                key={method.id}
-                checked={scanConfig.discoveryMethods.includes(method.id)}
-                onChange={() => handleDiscoveryMethodToggle(method.id)}
-                label={method.label}
-                description={method.description}
-              />
-            ))}
+            {DISCOVERY_METHODS.map((method) => {
+              const available = isMethodAvailable(method.id);
+              const isChecked = available && scanConfig.discoveryMethods.includes(method.id);
+              return (
+                <div key={method.id} className="flex items-start gap-2">
+                  <div className="flex-1">
+                    <Toggle
+                      checked={isChecked}
+                      onChange={() => {
+                        if (available) {
+                          handleDiscoveryMethodToggle(method.id);
+                        }
+                      }}
+                      disabled={!available}
+                      label={method.label}
+                      description={method.description}
+                    />
+                  </div>
+                  {!available && (
+                    <span
+                      className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 text-xs text-amber-400 bg-amber-900/20 border border-amber-700/30 rounded-md"
+                      title="This method requires elevated privileges"
+                    >
+                      <svg
+                        className="w-3 h-3"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        aria-hidden="true"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 9v2m0 4h.01M10.29 3.86l-8.58 14.86A1 1 0 002.58 20h18.84a1 1 0 00.87-1.5L13.71 3.86a1 1 0 00-1.72 0z"
+                        />
+                      </svg>
+                      Requires elevated privileges
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </SettingsSection>
       </div>
