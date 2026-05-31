@@ -7,11 +7,12 @@ use tauri_plugin_notification::NotificationExt;
 use tracing::warn;
 
 use crate::error::ScanError;
-use crate::network::{cidr, discovery, host_discovery, icmp, oui};
+use crate::network::{cidr, discovery, host_discovery, icmp, oui, sanitize};
+use crate::network::timing::TimingTemplate;
 use crate::state::SharedScanState;
 use crate::types::{
     DeviceFoundEvent, ScanCompleteEvent, ScanLogEvent, ScanResponse,
-    ScanResultsResponse, ScanStartedEvent,
+    ScanResultsResponse, ScanStartedEvent, ScanType,
 };
 
 /// Send a system notification about scan status.
@@ -58,7 +59,36 @@ pub async fn start_scan(
     max_concurrent_hosts: Option<u32>,
     discovery_methods: Option<Vec<String>>,
     retry_count: Option<u32>,
+    scan_type: Option<ScanType>,
+    timing_template: Option<TimingTemplate>,
 ) -> Result<ScanResponse, ScanError> {
+    // ── Input Validation (IPC Hardening) ──────────────────────────────
+    let _validated_cidr = sanitize::validate_cidr(&cidr)?;
+    let _validated_timeout = sanitize::validate_timeout_ms(timeout_ms)?;
+
+    if scan_ports && !ports.is_empty() {
+        sanitize::validate_ports(&ports)?;
+    }
+
+    let effective_scan_type = scan_type.unwrap_or_default();
+    let effective_timing = timing_template.unwrap_or_default();
+
+    // If SYN scan requested, verify privileges
+    if effective_scan_type == ScanType::Syn {
+        let priv_status = tokio::task::spawn_blocking(
+            crate::network::privileges::check_system_privileges,
+        )
+        .await
+        .map_err(|e| ScanError::NetworkError(format!("Privilege check failed: {}", e)))?;
+
+        if !priv_status.syn_scan_available {
+            return Err(ScanError::PermissionDenied(
+                "SYN scanning requires raw socket privileges (root/CAP_NET_RAW/Administrator). \
+                 Please use TCP Connect scan or run with elevated privileges.".to_string(),
+            ));
+        }
+    }
+
     emit_log(&app, "info", &format!("Validating CIDR: {}", cidr), None).await;
 
     // Validate CIDR
@@ -107,8 +137,8 @@ pub async fn start_scan(
         &app,
         "info",
         &format!(
-            "Scan started (methods: {:?}, max_concurrent: {}, retries: {})",
-            methods, effective_max_concurrent, effective_retry_count
+            "Scan started (methods: {:?}, max_concurrent: {}, retries: {}, type: {:?}, timing: {:?})",
+            methods, effective_max_concurrent, effective_retry_count, effective_scan_type, effective_timing
         ),
         None,
     )
@@ -119,6 +149,8 @@ pub async fn start_scan(
     let state_clone = state.inner().clone();
     let scan_id_clone = scan_id.clone();
     let cidr_clone = cidr.clone();
+    let timing_template_clone = effective_timing;
+    let scan_type_clone = effective_scan_type.clone();
 
     tokio::spawn(async move {
         let start_time = Instant::now();
@@ -192,6 +224,7 @@ pub async fn start_scan(
                             timestamp: chrono::Utc::now().timestamp(),
                             ports: Vec::new(),
                             discovery_method: "ArpTable".to_string(),
+                            banner_results: enriched.banner_results.clone(),
                         };
                         let _ = app_arc.emit("device_found", event);
                     }
@@ -298,6 +331,7 @@ pub async fn start_scan(
                                 timestamp: chrono::Utc::now().timestamp(),
                                 ports: updated_device.ports.clone(),
                                 discovery_method: "IcmpPing".to_string(),
+                                banner_results: updated_device.banner_results.clone(),
                             };
                             let _ = app_arc.emit("device_found", event);
                         }
@@ -473,6 +507,7 @@ pub async fn start_scan(
                             timestamp: chrono::Utc::now().timestamp(),
                             ports: updated_device.ports.clone(),
                             discovery_method: "TcpProbe".to_string(),
+                            banner_results: updated_device.banner_results.clone(),
                         };
                         let _ = app_arc.emit("device_found", event);
                     }
@@ -536,6 +571,7 @@ pub async fn start_scan(
     Ok(ScanResponse {
         scan_id,
         status: "started".to_string(),
+        scan_type: effective_scan_type,
     })
 }
 

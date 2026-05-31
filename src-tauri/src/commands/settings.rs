@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use log::{info, error};
 
 use crate::error::ScanError;
+use crate::network::sanitize;
 use crate::settings::{default_settings, SettingsManager, SettingsProfile};
 
 /// Get the configuration directory for NetSentinel
@@ -36,6 +37,10 @@ pub async fn get_settings_profiles() -> Result<Vec<SettingsProfile>, ScanError> 
 /// Save a settings profile
 #[tauri::command]
 pub async fn save_profile(profile: SettingsProfile) -> Result<(), ScanError> {
+    // Validate profile name
+    let _validated_name = sanitize::validate_name(&profile.name)?;
+    let _validated_id = sanitize::validate_id(&profile.id)?;
+
     let manager = create_settings_manager()?;
     let mut container = manager.load_profiles().await?;
 
@@ -62,8 +67,11 @@ pub async fn save_profile(profile: SettingsProfile) -> Result<(), ScanError> {
 /// Delete a settings profile by ID
 #[tauri::command]
 pub async fn delete_profile(id: String) -> Result<(), ScanError> {
+    // Validate ID
+    let validated_id = sanitize::validate_id(&id)?;
+
     // Cannot delete the default profile
-    if id == "default" {
+    if validated_id == "default" {
         return Err(ScanError::InvalidInput(
             "Cannot delete the default profile".to_string(),
         ));
@@ -73,22 +81,22 @@ pub async fn delete_profile(id: String) -> Result<(), ScanError> {
     let mut container = manager.load_profiles().await?;
 
     // Remove the profile
-    let removed = container.profiles.remove(&id);
+    let removed = container.profiles.remove(&validated_id);
 
     if removed.is_none() {
         return Err(ScanError::InvalidInput(format!(
             "Profile with ID '{}' not found",
-            id
+            validated_id
         )));
     }
 
     // If the deleted profile was the active one, reset active to default
-    if container.active_profile_id.as_ref() == Some(&id) {
+    if container.active_profile_id.as_ref() == Some(&validated_id) {
         container.active_profile_id = container.default_profile_id.clone();
     }
 
     // If the deleted profile was the default, reset default
-    if container.default_profile_id.as_ref() == Some(&id) {
+    if container.default_profile_id.as_ref() == Some(&validated_id) {
         container.default_profile_id = container.profiles.keys().next().cloned();
     }
 

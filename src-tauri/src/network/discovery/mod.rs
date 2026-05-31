@@ -41,6 +41,7 @@ pub async fn discover_devices(
                     timestamp: chrono::Utc::now().timestamp(),
                     ports: device.ports.clone(),
                     discovery_method: "ArpTable".to_string(),
+                    banner_results: device.banner_results.clone(),
                 };
                 let _ = app.emit("device_found", event);
             }

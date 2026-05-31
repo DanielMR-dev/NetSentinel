@@ -5,6 +5,8 @@ import { useScanStore } from '../../stores/scanStore';
 import { useCapabilitiesStore } from '../../stores/capabilitiesStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { Button } from '../common/Button';
+import { TimingTemplateSelector } from './TimingTemplateSelector';
+import { ScanTypeSelector } from './ScanTypeSelector';
 
 // Common ports with service labels for the chip UI
 const COMMON_PORTS: { port: number; label: string }[] = [
@@ -186,7 +188,11 @@ export const ScanConfigPanel: React.FC = () => {
   }, [isPaused, resumeScan, pauseScan]);
 
   return (
-    <div className="bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-800/95 rounded-2xl border border-gray-200 dark:border-gray-700/50 shadow-card p-5">
+    <div className="bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-800/95 rounded-2xl border border-gray-200 dark:border-gray-700/50 shadow-card p-5 space-y-4">
+      {/* Scan Type & Timing Template Selectors */}
+      <ScanTypeSelector />
+      <TimingTemplateSelector />
+
       {/* Error Display */}
       {error && (
         <div

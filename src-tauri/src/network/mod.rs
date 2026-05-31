@@ -1,6 +1,12 @@
+pub mod banner;
 pub mod cidr;
+pub mod cve;
 pub mod discovery;
 pub mod host_discovery;
 pub mod icmp;
 pub mod oui;
 pub mod platform;
+pub mod privileges;
+pub mod sanitize;
+pub mod syn_scan;
+pub mod timing;

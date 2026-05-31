@@ -35,6 +35,18 @@ pub enum ScanError {
 
     #[error("History error: {0}")]
     HistoryError(String),
+
+    #[error("Timeout")]
+    Timeout,
+
+    #[error("Baseline error: {0}")]
+    BaselineError(String),
+
+    #[error("CVE error: {0}")]
+    CveError(String),
+
+    #[error("Event error: {0}")]
+    EventError(String),
 }
 
 impl From<std::io::Error> for ScanError {

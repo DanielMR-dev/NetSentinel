@@ -172,6 +172,7 @@ pub async fn discover_hosts(
                             timestamp: chrono::Utc::now().timestamp(),
                             ports: Vec::new(),
                             discovery_method: "TcpProbe".to_string(),
+                            banner_results: device.banner_results.clone(),
                         };
                         let _ = app.emit("device_found", event);
                     }

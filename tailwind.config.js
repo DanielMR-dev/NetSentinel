@@ -9,27 +9,30 @@ export default {
     extend: {
       colors: {
         primary: {
-          DEFAULT: 'blue-600',
-          hover: 'blue-700',
-          light: 'blue-500',
+          DEFAULT: '#2563eb',
+          hover: '#1d4ed8',
+          light: '#3b82f6',
         },
         success: {
-          DEFAULT: 'green-600',
-          light: 'green-500',
+          DEFAULT: '#16a34a',
+          light: '#22c55e',
         },
         warning: {
-          DEFAULT: 'amber-500',
-          light: 'amber-400',
+          DEFAULT: '#f59e0b',
+          light: '#fbbf24',
         },
         danger: {
-          DEFAULT: 'red-600',
-          light: 'red-500',
+          DEFAULT: '#dc2626',
+          light: '#ef4444',
+        },
+        gray: {
+          750: '#27303f',
         },
         surface: {
-          DEFAULT: 'gray-800',
-          light: 'gray-750',
+          DEFAULT: '#1f2937',
+          light: '#27303f',
         },
-        background: 'gray-900',
+        background: '#111827',
       },
       boxShadow: {
         'card': '0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.2)',
@@ -37,11 +40,11 @@ export default {
         'card-inner': 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.2)',
       },
       backgroundImage: {
-        'gradient-primary': 'linear-gradient(to bottom, blue-600, blue-700)',
-        'gradient-success': 'linear-gradient(to bottom, green-600, green-700)',
-        'gradient-warning': 'linear-gradient(to bottom, amber-500, amber-600)',
-        'gradient-danger': 'linear-gradient(to bottom, red-600, red-700)',
-        'gradient-surface': 'linear-gradient(to bottom, gray-800, gray-750)',
+        'gradient-primary': 'linear-gradient(to bottom, #2563eb, #1d4ed8)',
+        'gradient-success': 'linear-gradient(to bottom, #16a34a, #15803d)',
+        'gradient-warning': 'linear-gradient(to bottom, #f59e0b, #d97706)',
+        'gradient-danger': 'linear-gradient(to bottom, #dc2626, #b91c1c)',
+        'gradient-surface': 'linear-gradient(to bottom, #1f2937, #27303f)',
         'shimmer': 'linear-gradient(to right, transparent, rgba(255,255,255,0.2), transparent)',
       },
       animation: {

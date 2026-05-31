@@ -2,8 +2,9 @@ import React, { useMemo, useCallback, useState } from 'react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useScanStore, useScanDevices } from '../../stores/scanStore';
+import { useBannerStore } from '../../stores/bannerStore';
 import type { FilterStatus } from '../../stores/scanStore';
-import type { Device } from '../../types/device';
+import type { Device, CveSeverity } from '../../types/device';
 import { devicesToCSV, devicesToJSON, downloadFile, copyToClipboard } from '../../utils/export';
 import { Button } from '../common/Button';
 
@@ -57,6 +58,7 @@ export const ScanResultsTable: React.FC = () => {
   const setFilterStatus = useScanStore((s) => s.setFilterStatus);
   const setFilterHasOpenPorts = useScanStore((s) => s.setFilterHasOpenPorts);
   const clearFilters = useScanStore((s) => s.clearFilters);
+  const cveAlerts = useBannerStore((s) => s.cveAlerts);
 
   const [copyFeedback, setCopyFeedback] = useState(false);
 
@@ -338,6 +340,9 @@ export const ScanResultsTable: React.FC = () => {
                 Last Seen
                 <SortIcon field="lastSeen" sortField={sortField} sortDirection={sortDirection} />
               </th>
+              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                CVEs
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -347,6 +352,7 @@ export const ScanResultsTable: React.FC = () => {
                 device={device}
                 isSelected={selectedDeviceId === device.ip}
                 onSelect={handleSelectDevice}
+                cveAlerts={cveAlerts}
               />
             ))}
           </tbody>
@@ -372,13 +378,45 @@ interface DeviceRowProps {
   device: Device;
   isSelected: boolean;
   onSelect: (ip: string) => void;
+  cveAlerts: import('../../types/device').CveAlertEvent[];
 }
 
-const DeviceRow: React.FC<DeviceRowProps> = React.memo(({ device, isSelected, onSelect }) => {
+function getHighestSeverity(alerts: import('../../types/device').CveAlertEvent[]): CveSeverity | null {
+  if (alerts.length === 0) return null;
+  const order: Record<CveSeverity, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+  let highest: CveSeverity = 'low';
+  for (const alert of alerts) {
+    if (order[alert.severity] < order[highest]) {
+      highest = alert.severity;
+    }
+  }
+  return highest;
+}
+
+function getSeverityIconColor(severity: CveSeverity): string {
+  switch (severity) {
+    case 'critical':
+    case 'high':
+      return 'text-red-500 dark:text-red-400';
+    case 'medium':
+      return 'text-yellow-500 dark:text-yellow-400';
+    case 'low':
+      return 'text-blue-500 dark:text-blue-400';
+  }
+}
+
+const DeviceRow: React.FC<DeviceRowProps> = React.memo(({ device, isSelected, onSelect, cveAlerts }) => {
   const openPortCount = useMemo(
     () => device.ports.filter((p) => p.state === 'open').length,
     [device.ports]
   );
+
+  const deviceCves = useMemo(
+    () => cveAlerts.filter((a) => a.ip === device.ip),
+    [cveAlerts, device.ip]
+  );
+
+  const highestSeverity = useMemo(() => getHighestSeverity(deviceCves), [deviceCves]);
 
   const handleClick = useCallback(() => {
     onSelect(device.ip);
@@ -431,6 +469,21 @@ const DeviceRow: React.FC<DeviceRowProps> = React.memo(({ device, isSelected, on
       </td>
       <td className="px-4 py-3 text-sm text-gray-400 dark:text-gray-500">
         {new Date(device.lastSeen * 1000).toLocaleTimeString()}
+      </td>
+      <td className="px-4 py-3 text-center">
+        {highestSeverity ? (
+          <span
+            className={clsx('inline-flex items-center gap-1', getSeverityIconColor(highestSeverity))}
+            title={`${deviceCves.length} CVE${deviceCves.length !== 1 ? 's' : ''} (highest: ${highestSeverity})`}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86l-8.58 14.86A1 1 0 002.58 20h18.84a1 1 0 00.87-1.5L13.71 3.86a1 1 0 00-1.72 0z" />
+            </svg>
+            <span className="text-xs font-medium">{deviceCves.length}</span>
+          </span>
+        ) : (
+          <span className="text-gray-300 dark:text-gray-700">—</span>
+        )}
       </td>
     </tr>
   );

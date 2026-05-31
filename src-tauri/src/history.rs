@@ -200,6 +200,7 @@ mod tests {
                 status: DeviceStatus::Online,
                 ports: Vec::new(),
                 last_seen: timestamp,
+                banner_results: Vec::new(),
             }],
             timestamp,
         }

@@ -1,3 +1,5 @@
+import type { ScanType, TimingTemplate } from './device';
+
 export interface ScanConfig {
   defaultCidr: string;
   timeoutMs: number;
@@ -7,6 +9,8 @@ export interface ScanConfig {
   selectedPorts: number[];
   discoveryMethods: string[];
   retryCount: number;
+  defaultScanType: ScanType;
+  defaultTimingTemplate: TimingTemplate;
 }
 
 export interface UiPreferences {
@@ -46,6 +50,8 @@ export function createDefaultScanConfig(): ScanConfig {
     selectedPorts: [21, 22, 23, 25, 53, 80, 110, 143, 443, 445, 993, 995, 3306, 3389, 5432, 5900, 6379, 8080, 8443],
     discoveryMethods: ['arp', 'tcp_probe', 'icmp'],
     retryCount: 3,
+    defaultScanType: 'connect',
+    defaultTimingTemplate: 'normal',
   };
 }
 
@@ -124,7 +130,9 @@ export function isValidScanConfig(obj: unknown): obj is ScanConfig {
     typeof config.scanPortsEnabled === 'boolean' &&
     Array.isArray(config.selectedPorts) &&
     Array.isArray(config.discoveryMethods) &&
-    typeof config.retryCount === 'number'
+    typeof config.retryCount === 'number' &&
+    typeof config.defaultScanType === 'string' &&
+    typeof config.defaultTimingTemplate === 'string'
   );
 }
 

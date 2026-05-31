@@ -98,8 +98,8 @@ export const useSettingsStore = create<SettingsState>()(
             const currentMatchesBackend = normalizedProfiles.some(p => p.id === persistedSettings.id);
             const persistedProfileStillExists = persistedCurrentId && normalizedProfiles.some(p => p.id === persistedCurrentId);
 
-            let newCurrentId = persistedProfileStillExists ? persistedCurrentId : normalizedProfiles[0].id;
-            let newSettings = currentMatchesBackend ? persistedSettings : normalizedProfiles[0];
+            const newCurrentId = persistedProfileStillExists ? persistedCurrentId : normalizedProfiles[0].id;
+            const newSettings = currentMatchesBackend ? persistedSettings : normalizedProfiles[0];
 
             set({
               profiles: normalizedProfiles,

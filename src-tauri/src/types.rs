@@ -1,5 +1,23 @@
 use serde::{Deserialize, Serialize};
 
+use crate::network::banner::BannerResult;
+
+/// Scan type enumeration
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ScanType {
+    /// Standard TCP Connect scan (no special privileges needed)
+    Connect,
+    /// Stealth SYN scan (requires raw socket privileges)
+    Syn,
+}
+
+impl Default for ScanType {
+    fn default() -> Self {
+        ScanType::Connect
+    }
+}
+
 /// Log level enumeration for scan logging
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum LogLevel {
@@ -70,6 +88,8 @@ pub struct Device {
     pub status: DeviceStatus,
     pub ports: Vec<Port>,
     pub last_seen: i64,
+    /// Banner grab results for this device
+    pub banner_results: Vec<BannerResult>,
 }
 
 impl Device {
@@ -82,6 +102,7 @@ impl Device {
             status: DeviceStatus::Unknown,
             ports: Vec::new(),
             last_seen: chrono::Utc::now().timestamp(),
+            banner_results: Vec::new(),
         }
     }
 
@@ -116,6 +137,8 @@ impl Device {
 pub struct ScanResponse {
     pub scan_id: String,
     pub status: String,
+    /// The scan type being used
+    pub scan_type: ScanType,
 }
 
 /// Scan results containing discovered devices
@@ -136,6 +159,8 @@ pub struct DeviceFoundEvent {
     pub timestamp: i64,
     pub ports: Vec<Port>,
     pub discovery_method: String,
+    /// Banner grab results for this device
+    pub banner_results: Vec<BannerResult>,
 }
 
 /// Event emitted during scan progress

@@ -62,6 +62,8 @@ export const ScanConfigSection: React.FC = () => {
       selectedPorts: Array.isArray(settings.scanConfig.selectedPorts) ? settings.scanConfig.selectedPorts : defaultConfig.selectedPorts,
       discoveryMethods: Array.isArray(settings.scanConfig.discoveryMethods) ? settings.scanConfig.discoveryMethods : defaultConfig.discoveryMethods,
       retryCount: typeof settings.scanConfig.retryCount === 'number' ? settings.scanConfig.retryCount : defaultConfig.retryCount,
+      defaultScanType: typeof settings.scanConfig.defaultScanType === 'string' ? settings.scanConfig.defaultScanType : defaultConfig.defaultScanType,
+      defaultTimingTemplate: typeof settings.scanConfig.defaultTimingTemplate === 'string' ? settings.scanConfig.defaultTimingTemplate : defaultConfig.defaultTimingTemplate,
     };
   }, [settings?.scanConfig]);
 

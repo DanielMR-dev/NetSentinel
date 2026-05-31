@@ -1,7 +1,9 @@
+pub mod baseline;
 mod device;
 pub mod history;
 pub mod network;
 pub mod platform;
+pub mod privilege;
 pub mod scan;
 pub mod settings;
 
@@ -76,3 +78,11 @@ pub use settings::{
 pub use history::{
     save_scan_history, get_scan_history, delete_scan_history_entry, clear_scan_history,
 };
+
+// Re-export baseline commands
+pub use baseline::{
+    save_baseline, get_baselines, delete_baseline, compare_baseline,
+};
+
+// Re-export privilege command
+pub use privilege::check_privilege_status;

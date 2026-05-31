@@ -435,6 +435,7 @@ pub async fn icmp_ping_sweep(
                             timestamp: chrono::Utc::now().timestamp(),
                             ports: Vec::new(),
                             discovery_method: "IcmpPing".to_string(),
+                            banner_results: device.banner_results.clone(),
                         };
                         let _ = app.emit("device_found", event);
 

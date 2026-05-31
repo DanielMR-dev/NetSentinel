@@ -1,3 +1,4 @@
+mod baseline;
 mod commands;
 mod error;
 mod history;
@@ -19,6 +20,10 @@ pub use commands::settings::{
 pub use commands::history::{
     save_scan_history, get_scan_history, delete_scan_history_entry, clear_scan_history,
 };
+pub use commands::baseline::{
+    save_baseline, get_baselines, delete_baseline, compare_baseline,
+};
+pub use commands::privilege::check_privilege_status;
 pub use error::ScanError;
 pub use history::ScanHistoryEntry;
 pub use settings::SettingsProfile;
@@ -36,10 +41,27 @@ pub fn run() {
         )
         .plugin(tauri_plugin_notification::init())
         .manage(shared_state)
+        .setup(|app| {
+            // Run privilege check at startup and emit status to frontend
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let status = network::privileges::check_system_privileges();
+                if !status.warnings.is_empty() {
+                    tracing::warn!(
+                        "Privilege warnings at startup: {:?}",
+                        status.warnings
+                    );
+                }
+                // Emit privilege status event to frontend
+                let _ = tauri::Emitter::emit(&app_handle, "privilege_status", &status);
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_device_info,
             get_network_info,
             get_platform_capabilities,
+            check_privilege_status,
             start_scan,
             stop_scan,
             pause_scan,
@@ -55,6 +77,10 @@ pub fn run() {
             get_scan_history,
             delete_scan_history_entry,
             clear_scan_history,
+            save_baseline,
+            get_baselines,
+            delete_baseline,
+            compare_baseline,
         ])
         .run(tauri::generate_context!())
     {

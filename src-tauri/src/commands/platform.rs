@@ -19,12 +19,13 @@
 //! | `tcp_probe` | Always available (uses `tokio::net::TcpStream`)       | None                |
 //! | `arp_scan`  | Attempt to read ARP table via platform provider       | Usually none        |
 //! | `icmp_ping` | `check_icmp_privileges()` (root/CAP_NET_RAW/Admin)   | Elevated            |
+//! | `syn_scan`  | Raw socket creation test                              | Elevated            |
 
 use serde::{Deserialize, Serialize};
 
 use crate::commands::CommandError;
-use crate::network::icmp;
 use crate::network::platform;
+use crate::network::privileges;
 
 /// Platform capabilities response sent to the frontend.
 ///
@@ -52,6 +53,7 @@ pub struct PlatformCapabilities {
     /// - `"tcp_probe"` — **always** available (no privileges needed)
     /// - `"arp_scan"` — available if the ARP table can be read
     /// - `"icmp_ping"` — available only with root / CAP_NET_RAW / Administrator
+    /// - `"syn_scan"` — available only with raw socket privileges
     pub capabilities: Vec<String>,
 
     /// Human-readable warnings about missing capabilities.
@@ -74,17 +76,16 @@ pub struct PlatformCapabilities {
 pub async fn get_platform_capabilities() -> Result<PlatformCapabilities, CommandError> {
     let platform = std::env::consts::OS.to_string();
 
-    let mut capabilities = Vec::with_capacity(3);
+    // Use the comprehensive privilege check
+    let priv_status = privileges::check_system_privileges();
+
+    let mut capabilities = Vec::with_capacity(4);
     let mut warnings = Vec::new();
 
     // ── TCP probe: always available ─────────────────────────────────────
     capabilities.push("tcp_probe".to_string());
 
     // ── ARP scan: try reading the ARP table ─────────────────────────────
-    // ARP table reading is a read-only kernel operation that usually works
-    // without elevated privileges. We attempt it to verify, but include
-    // the capability regardless since transient failures (empty table on
-    // fresh boot) don't mean the capability is absent.
     let arp_provider = platform::create_arp_provider();
     match arp_provider.read_arp_table().await {
         Ok(entries) => {
@@ -99,46 +100,68 @@ pub async fn get_platform_capabilities() -> Result<PlatformCapabilities, Command
                 "ARP table read failed (capability still advertised): {}",
                 e
             );
-            // ARP is a read-only operation that usually succeeds. A transient
-            // failure (e.g., empty table) does not mean the capability is
-            // permanently unavailable, so we still advertise it.
             capabilities.push("arp_scan".to_string());
         }
     }
 
     // ── ICMP ping: requires elevated privileges ─────────────────────────
-    let is_elevated = match icmp::check_icmp_privileges() {
-        Ok(()) => {
-            tracing::info!("ICMP privileges confirmed — icmp_ping available");
-            capabilities.push("icmp_ping".to_string());
-            true
-        }
-        Err(e) => {
-            tracing::info!("ICMP privileges unavailable: {}", e);
+    let is_elevated = priv_status.is_elevated;
 
-            let warning = match platform.as_str() {
-                "linux" => concat!(
-                    "ICMP ping requires root privileges or CAP_NET_RAW capability. ",
-                    "Run with sudo or set capabilities."
-                )
-                .to_string(),
-                "windows" => concat!(
-                    "ICMP ping requires Administrator privileges. ",
-                    "Run as Administrator and ensure Npcap is installed."
-                )
-                .to_string(),
-                "macos" => {
-                    "ICMP ping requires root privileges. Run with sudo.".to_string()
-                }
-                other => {
-                    format!("ICMP ping is not supported on platform '{}'.", other)
-                }
-            };
+    if priv_status.icmp_available {
+        tracing::info!("ICMP privileges confirmed — icmp_ping available");
+        capabilities.push("icmp_ping".to_string());
+    } else {
+        tracing::info!("ICMP privileges unavailable");
 
-            warnings.push(warning);
-            false
-        }
-    };
+        let warning = match platform.as_str() {
+            "linux" => concat!(
+                "ICMP ping requires root privileges or CAP_NET_RAW capability. ",
+                "Run with sudo or set capabilities."
+            )
+            .to_string(),
+            "windows" => concat!(
+                "ICMP ping requires Administrator privileges. ",
+                "Run as Administrator and ensure Npcap is installed."
+            )
+            .to_string(),
+            "macos" => {
+                "ICMP ping requires root privileges. Run with sudo.".to_string()
+            }
+            other => {
+                format!("ICMP ping is not supported on platform '{}'.", other)
+            }
+        };
+
+        warnings.push(warning);
+    }
+
+    // ── SYN scan: requires raw socket privileges ────────────────────────
+    if priv_status.syn_scan_available {
+        tracing::info!("SYN scan available");
+        capabilities.push("syn_scan".to_string());
+    } else {
+        let warning = match platform.as_str() {
+            "linux" => concat!(
+                "SYN scanning requires root privileges or CAP_NET_RAW capability. ",
+                "Run with sudo or set capabilities for stealth scanning."
+            )
+            .to_string(),
+            "windows" => concat!(
+                "SYN scanning requires Administrator privileges and Npcap. ",
+                "Run as Administrator for stealth scanning."
+            )
+            .to_string(),
+            "macos" => {
+                "SYN scanning requires root privileges. Run with sudo for stealth scanning."
+                    .to_string()
+            }
+            _ => "SYN scanning is not available on this platform.".to_string(),
+        };
+        warnings.push(warning);
+    }
+
+    // Add any warnings from the privilege check
+    warnings.extend(priv_status.warnings);
 
     tracing::info!(
         "Platform capabilities detected: platform={}, elevated={}, capabilities={:?}, warnings={:?}",

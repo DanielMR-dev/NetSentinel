@@ -1,7 +1,7 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { useScanStore, setupScanEventListeners, cleanupScanEventListeners } from '../../stores/scanStore';
+import { useScanStore } from '../../stores/scanStore';
 import { ScanConfigPanel } from './ScanConfigPanel';
 import { ScanProgress } from './ScanProgress';
 import { ScanResultsTable } from './ScanResultsTable';
@@ -10,13 +10,6 @@ import { DeviceDetailPanel } from './DeviceDetailPanel';
 export const ScanView: React.FC = () => {
   const devices = useScanStore((s) => s.devices);
   const selectedDeviceId = useScanStore((s) => s.selectedDeviceId);
-
-  useEffect(() => {
-    setupScanEventListeners();
-    return () => {
-      cleanupScanEventListeners();
-    };
-  }, []);
 
   const selectedDevice = selectedDeviceId
     ? devices.find((d) => d.ip === selectedDeviceId)

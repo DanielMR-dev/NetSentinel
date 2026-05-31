@@ -6,8 +6,9 @@ import type { TabId } from '../stores/dashboardStore';
 const TAB_MAP: Record<string, TabId> = {
   '1': 'dashboard',
   '2': 'scan',
-  '3': 'settings',
-  '4': 'history',
+  '3': 'baseline',
+  '4': 'settings',
+  '5': 'history',
 };
 
 export function useKeyboardShortcuts() {

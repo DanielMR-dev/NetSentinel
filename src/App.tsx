@@ -1,12 +1,16 @@
 import { useEffect, useState, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useDashboardStore } from './stores/dashboardStore';
-import { useCapabilitiesStore } from './stores/capabilitiesStore';
+import { useCapabilitiesStore, setupPrivilegeStatusListener, cleanupPrivilegeStatusListener } from './stores/capabilitiesStore';
+import { setupScanEventListeners, cleanupScanEventListeners } from './stores/scanStore';
+import { setupBannerEventListeners, cleanupBannerEventListeners } from './stores/bannerStore';
+import { setupBaselineEventListeners, cleanupBaselineEventListeners } from './stores/baselineStore';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { ScanView } from './components/scan/ScanView';
 import { TabNavigation } from './components/dashboard/TabNavigation';
 import { SettingsView } from './components/settings/SettingsView';
 import { HistoryView } from './components/dashboard/HistoryView';
+import { BaselineView } from './components/baseline/BaselineView';
 import { PrivilegeBanner } from './components/common/PrivilegeBanner';
 import { useTheme } from './hooks/useTheme';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -25,8 +29,9 @@ const SHORTCUTS = [
   { keys: 'Ctrl+F', description: 'Focus search' },
   { keys: 'Ctrl+1', description: 'Dashboard tab' },
   { keys: 'Ctrl+2', description: 'Scan tab' },
-  { keys: 'Ctrl+3', description: 'Settings tab' },
-  { keys: 'Ctrl+4', description: 'History tab' },
+  { keys: 'Ctrl+3', description: 'Baseline tab' },
+  { keys: 'Ctrl+4', description: 'Settings tab' },
+  { keys: 'Ctrl+5', description: 'History tab' },
 ] as const;
 
 const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ onClose }) => {
@@ -84,6 +89,7 @@ export function App() {
   const activeTab = useDashboardStore((s) => s.activeTab);
   const setActiveTab = useDashboardStore((s) => s.setActiveTab);
   const fetchCapabilities = useCapabilitiesStore((s) => s.fetchCapabilities);
+  const fetchPrivilegeStatus = useCapabilitiesStore((s) => s.fetchPrivilegeStatus);
 
   const { theme, toggleTheme } = useTheme();
   useKeyboardShortcuts();
@@ -92,10 +98,34 @@ export function App() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Fetch platform capabilities once on app mount
+  // Fetch platform capabilities and privilege status once on app mount
   useEffect(() => {
     fetchCapabilities();
-  }, [fetchCapabilities]);
+    fetchPrivilegeStatus();
+  }, [fetchCapabilities, fetchPrivilegeStatus]);
+
+  // Set up all event listeners on mount
+  useEffect(() => {
+    const setupAll = async () => {
+      try {
+        await setupScanEventListeners();
+        await setupBannerEventListeners();
+        await setupBaselineEventListeners();
+        await setupPrivilegeStatusListener();
+      } catch (error) {
+        console.error('Failed to set up event listeners:', error);
+      }
+    };
+
+    setupAll();
+
+    return () => {
+      cleanupScanEventListeners();
+      cleanupBannerEventListeners();
+      cleanupBaselineEventListeners();
+      cleanupPrivilegeStatusListener();
+    };
+  }, []);
 
   // Request notification permission on mount
   useEffect(() => {
@@ -239,6 +269,7 @@ export function App() {
         <TabNavigation activeTab={activeTab} onTabChange={setActiveTab} />
         {activeTab === 'dashboard' && <DashboardView />}
         {activeTab === 'scan' && <ScanView />}
+        {activeTab === 'baseline' && <BaselineView />}
         {activeTab === 'settings' && <SettingsView />}
         {activeTab === 'history' && <HistoryView />}
       </main>

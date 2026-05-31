@@ -6,10 +6,15 @@
 use crate::commands::settings::get_config_dir;
 use crate::error::ScanError;
 use crate::history::{HistoryStore, ScanHistoryEntry};
+use crate::network::sanitize;
 
 /// Save a completed scan to history.
 #[tauri::command]
 pub async fn save_scan_history(entry: ScanHistoryEntry) -> Result<(), ScanError> {
+    // Validate inputs
+    let _validated_id = sanitize::validate_id(&entry.id)?;
+    let _validated_cidr = sanitize::validate_cidr(&entry.cidr)?;
+
     let config_dir = get_config_dir()?;
     let store = HistoryStore::new(config_dir);
     store.add_entry(entry).await
@@ -27,9 +32,11 @@ pub async fn get_scan_history() -> Result<Vec<ScanHistoryEntry>, ScanError> {
 /// Delete a single history entry by ID.
 #[tauri::command]
 pub async fn delete_scan_history_entry(id: String) -> Result<(), ScanError> {
+    let validated_id = sanitize::validate_id(&id)?;
+
     let config_dir = get_config_dir()?;
     let store = HistoryStore::new(config_dir);
-    store.delete_entry(&id).await
+    store.delete_entry(&validated_id).await
 }
 
 /// Delete all history entries.

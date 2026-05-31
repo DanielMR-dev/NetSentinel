@@ -9,6 +9,8 @@ import type {
   ScanResponse,
   ScanLogEvent,
   ScanHistoryEntry,
+  ScanType,
+  TimingTemplate,
 } from '../types/device';
 import type { ScanConfig } from '../types/settings';
 import { useSettingsStore } from './settingsStore';
@@ -23,6 +25,8 @@ interface ScanState {
   scanPorts: boolean;
   selectedPorts: number[];
   timeoutMs: number;
+  scanType: ScanType;
+  timingTemplate: TimingTemplate;
 
   // Scan status
   isScanning: boolean;
@@ -56,6 +60,8 @@ interface ScanActions {
   setScanPorts: (scanPorts: boolean) => void;
   setSelectedPorts: (ports: number[]) => void;
   setTimeoutMs: (timeoutMs: number) => void;
+  setScanType: (scanType: ScanType) => void;
+  setTimingTemplate: (template: TimingTemplate) => void;
   startScan: () => Promise<void>;
   stopScan: () => Promise<void>;
   pauseScan: () => Promise<void>;
@@ -89,6 +95,8 @@ export const useScanStore = create<ScanStore>((set, get) => ({
   scanPorts: true,
   selectedPorts: DEFAULT_PORTS,
   timeoutMs: 1000,
+  scanType: 'connect' as ScanType,
+  timingTemplate: 'normal' as TimingTemplate,
 
   isScanning: false,
   isPaused: false,
@@ -119,8 +127,12 @@ export const useScanStore = create<ScanStore>((set, get) => ({
 
   setTimeoutMs: (timeoutMs: number) => set({ timeoutMs }),
 
+  setScanType: (scanType: ScanType) => set({ scanType }),
+
+  setTimingTemplate: (template: TimingTemplate) => set({ timingTemplate: template }),
+
   startScan: async () => {
-    const { cidr, scanPorts, selectedPorts, timeoutMs } = get();
+    const { cidr, scanPorts, selectedPorts, timeoutMs, scanType, timingTemplate } = get();
 
     // Read from settings store for advanced scan parameters
     const settings = useSettingsStore.getState().settings;
@@ -150,6 +162,8 @@ export const useScanStore = create<ScanStore>((set, get) => ({
         maxConcurrentHosts: scanConfig?.maxConcurrentHosts ?? null,
         discoveryMethods: scanConfig?.discoveryMethods ?? null,
         retryCount: scanConfig?.retryCount ?? null,
+        scanType,
+        timingTemplate,
       });
 
       set({ scanId: response.scan_id });
@@ -234,6 +248,12 @@ export const useScanStore = create<ScanStore>((set, get) => ({
     if (scanConfig.selectedPorts?.length) {
       updates.selectedPorts = scanConfig.selectedPorts;
     }
+    if (scanConfig.defaultScanType) {
+      updates.scanType = scanConfig.defaultScanType;
+    }
+    if (scanConfig.defaultTimingTemplate) {
+      updates.timingTemplate = scanConfig.defaultTimingTemplate;
+    }
     set(updates);
   },
 
@@ -312,6 +332,7 @@ export async function setupScanEventListeners() {
       status: 'online',
       ports: event.payload.ports || [],
       lastSeen: event.payload.timestamp,
+      banner_results: event.payload.banner_results || [],
     };
 
     useScanStore.getState()._addDevice(device);
@@ -365,3 +386,5 @@ export const useScanLogs = () => useScanStore((s) => s.logs);
 export const useSearchQuery = () => useScanStore((s) => s.searchQuery);
 export const useFilterStatus = () => useScanStore((s) => s.filterStatus);
 export const useFilterHasOpenPorts = () => useScanStore((s) => s.filterHasOpenPorts);
+export const useScanType = () => useScanStore((s) => s.scanType);
+export const useTimingTemplate = () => useScanStore((s) => s.timingTemplate);

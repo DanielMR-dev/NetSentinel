@@ -11,6 +11,7 @@ interface Tab {
 const TABS: Tab[] = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'scan', label: 'Scan' },
+  { id: 'baseline', label: 'Baseline' },
   { id: 'settings', label: 'Settings' },
   { id: 'history', label: 'History' },
 ];
