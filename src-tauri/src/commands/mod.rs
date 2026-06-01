@@ -1,5 +1,6 @@
 pub mod baseline;
 mod device;
+pub mod export;
 pub mod history;
 pub mod network;
 pub mod platform;
@@ -67,6 +68,9 @@ pub use platform::get_platform_capabilities;
 
 // Re-export scan commands
 pub use scan::{start_scan, stop_scan, pause_scan, resume_scan, get_scan_results};
+
+// Re-export export commands
+pub use export::export_audit_report;
 
 // Re-export settings commands
 pub use settings::{

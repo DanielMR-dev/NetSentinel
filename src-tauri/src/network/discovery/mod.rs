@@ -5,6 +5,7 @@
 //! - `tcp_probe`: TCP port probing as a fallback when ARP is unavailable
 
 pub mod arp_table;
+pub mod arp_sweep;
 pub mod tcp_probe;
 
 use tauri::Emitter;
@@ -38,6 +39,7 @@ pub async fn discover_devices(
                     mac: device.mac.clone(),
                     hostname: device.hostname.clone(),
                     vendor: device.vendor.clone(),
+                    os: device.os.clone(),
                     timestamp: chrono::Utc::now().timestamp(),
                     ports: device.ports.clone(),
                     discovery_method: "ArpTable".to_string(),

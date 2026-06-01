@@ -11,19 +11,13 @@ use std::sync::Arc;
 
 pub use commands::{
     get_device_info, get_network_info, start_scan, stop_scan, pause_scan, resume_scan,
-    get_scan_results, get_platform_capabilities, CommandError, DeviceInfo, NetworkInfo,
-};
-pub use commands::settings::{
+    get_scan_results, get_platform_capabilities, export_audit_report, CommandError, DeviceInfo, NetworkInfo,
     get_settings_profiles, save_profile, delete_profile, load_settings, save_settings,
-    get_default_settings,
+    get_default_settings, save_scan_history, get_scan_history, delete_scan_history_entry,
+    clear_scan_history, save_baseline, get_baselines, delete_baseline, compare_baseline,
+    check_privilege_status,
 };
-pub use commands::history::{
-    save_scan_history, get_scan_history, delete_scan_history_entry, clear_scan_history,
-};
-pub use commands::baseline::{
-    save_baseline, get_baselines, delete_baseline, compare_baseline,
-};
-pub use commands::privilege::check_privilege_status;
+pub use network::cve::update_cve_database;
 pub use error::ScanError;
 pub use history::ScanHistoryEntry;
 pub use settings::SettingsProfile;
@@ -81,6 +75,8 @@ pub fn run() {
             get_baselines,
             delete_baseline,
             compare_baseline,
+            update_cve_database,
+            export_audit_report,
         ])
         .run(tauri::generate_context!())
     {

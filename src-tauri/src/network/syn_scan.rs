@@ -25,6 +25,7 @@ use pnet::packet::tcp::{ipv4_checksum, MutableTcpPacket, TcpFlags, TcpPacket};
 use pnet::util::MacAddr;
 
 use crate::error::ScanError;
+use crate::network::platform;
 use crate::network::timing::TimingController;
 use crate::types::{Port, PortState};
 
@@ -95,6 +96,86 @@ impl SynScanner {
             src_mac,
             gateway_mac,
         })
+    }
+
+    /// Create a new SYN scanner resolved automatically for target_ip.
+    pub async fn new_for_target(target_ip: Ipv4Addr) -> Result<Self, ScanError> {
+        let (interface, src_ip) = Self::resolve_interface_and_ip(target_ip)
+            .await
+            .ok_or_else(|| {
+                ScanError::NetworkError(format!(
+                    "Failed to resolve network interface for target {}",
+                    target_ip
+                ))
+            })?;
+
+        let src_mac = interface.mac.unwrap_or(MacAddr::zero());
+        let gateway_mac = MacAddr::broadcast();
+
+        Ok(Self {
+            src_ip,
+            interface,
+            src_mac,
+            gateway_mac,
+        })
+    }
+
+    /// Resolve the best interface and source IP to route to target_ip.
+    pub async fn resolve_interface_and_ip(
+        target_ip: Ipv4Addr,
+    ) -> Option<(NetworkInterface, Ipv4Addr)> {
+        let interfaces = datalink::interfaces();
+
+        // 1. Direct subnet check
+        for iface in &interfaces {
+            if iface.is_loopback() {
+                continue;
+            }
+            for ip_net in &iface.ips {
+                if let IpAddr::V4(ipv4_addr) = ip_net.ip() {
+                    if let Ok(subnet) = ipnetwork::Ipv4Network::new(ipv4_addr, ip_net.prefix()) {
+                        if subnet.contains(target_ip) {
+                            return Some((iface.clone(), ipv4_addr));
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Gateway route check
+        let gateway_provider = platform::create_gateway_provider();
+        if let Some(gateway_str) = gateway_provider.get_default_gateway().await {
+            if let Ok(gateway_ip) = gateway_str.parse::<Ipv4Addr>() {
+                for iface in &interfaces {
+                    if iface.is_loopback() {
+                        continue;
+                    }
+                    for ip_net in &iface.ips {
+                        if let IpAddr::V4(ipv4_addr) = ip_net.ip() {
+                            if let Ok(subnet) = ipnetwork::Ipv4Network::new(ipv4_addr, ip_net.prefix()) {
+                                if subnet.contains(gateway_ip) {
+                                    return Some((iface.clone(), ipv4_addr));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Fallback: first non-loopback interface with an IPv4 address
+        for iface in &interfaces {
+            if iface.is_loopback() {
+                continue;
+            }
+            for ip_net in &iface.ips {
+                if let IpAddr::V4(ipv4_addr) = ip_net.ip() {
+                    return Some((iface.clone(), ipv4_addr));
+                }
+            }
+        }
+
+        None
     }
 
     /// Craft a TCP SYN packet for the given target.
@@ -235,15 +316,15 @@ impl SynScanner {
     /// It MUST be called inside `tokio::task::spawn_blocking`.
     ///
     /// # Returns
-    /// - `PortState::Open` if SYN-ACK received (RST sent to abort)
-    /// - `PortState::Closed` if RST/RST-ACK received
-    /// - `PortState::Filtered` if timeout (no response)
+    /// - `(PortState::Open, Some(ttl))` if SYN-ACK received (RST sent to abort)
+    /// - `(PortState::Closed, Some(ttl))` if RST/RST-ACK received
+    /// - `(PortState::Filtered, None)` if timeout (no response)
     pub fn scan_port_blocking(
         &self,
         target_ip: Ipv4Addr,
         target_port: u16,
         timeout: Duration,
-    ) -> Result<PortState, ScanError> {
+    ) -> Result<(PortState, Option<u8>), ScanError> {
         let src_port = rand_port();
 
         // Create raw socket for sending
@@ -298,7 +379,7 @@ impl SynScanner {
 
         loop {
             if Instant::now() >= deadline {
-                return Ok(PortState::Filtered);
+                return Ok((PortState::Filtered, None));
             }
 
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -356,12 +437,12 @@ impl SynScanner {
                                     &socket2::SockAddr::from(dest),
                                 );
 
-                                return Ok(PortState::Open);
+                                return Ok((PortState::Open, Some(ipv4.get_ttl())));
                             }
 
                             // RST received → port is closed
                             if flags & TcpFlags::RST != 0 {
-                                return Ok(PortState::Closed);
+                                return Ok((PortState::Closed, Some(ipv4.get_ttl())));
                             }
                         }
                     }
@@ -369,7 +450,7 @@ impl SynScanner {
                 Err(e) => {
                     match e.kind() {
                         std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
-                            return Ok(PortState::Filtered);
+                            return Ok((PortState::Filtered, None));
                         }
                         _ => {
                             return Err(ScanError::NetworkError(format!(
@@ -392,12 +473,12 @@ impl SynScanner {
         target_ip: Ipv4Addr,
         ports: &[u16],
         timing: &TimingController,
-    ) -> Vec<Port> {
+    ) -> (Vec<Port>, Option<u8>) {
         use futures::stream::{self, StreamExt};
 
         let timeout = timing.connection_timeout();
 
-        let results: Vec<(u16, PortState)> = stream::iter(ports.to_vec())
+        let results: Vec<(u16, PortState, Option<u8>)> = stream::iter(ports.to_vec())
             .map(|port| {
                 let scanner_ip = self.src_ip;
                 let scanner_iface_name = self.interface.name.clone();
@@ -426,7 +507,7 @@ impl SynScanner {
                                         .unwrap_or_else(|| {
                                             panic!("No network interface available")
                                         })
-                                }),
+                                    }),
                             src_mac: scanner_src_mac,
                             gateway_mac: scanner_gw_mac,
                         };
@@ -434,22 +515,28 @@ impl SynScanner {
                     })
                     .await;
 
-                    let state = match result {
-                        Ok(Ok(state)) => state,
-                        Ok(Err(_)) => PortState::Filtered,
-                        Err(_) => PortState::Filtered,
+                    let (state, ttl) = match result {
+                        Ok(Ok((state, ttl))) => (state, ttl),
+                        Ok(Err(_)) => (PortState::Filtered, None),
+                        Err(_) => (PortState::Filtered, None),
                     };
 
-                    (port, state)
+                    (port, state, ttl)
                 }
             })
             .buffer_unordered(timing.max_concurrent().min(ports.len().max(1)))
             .collect()
             .await;
 
-        results
+        let mut detected_ttl = None;
+        let scanned_ports: Vec<Port> = results
             .into_iter()
-            .map(|(port, state)| {
+            .map(|(port, state, ttl)| {
+                if let Some(t) = ttl {
+                    if detected_ttl.is_none() {
+                        detected_ttl = Some(t);
+                    }
+                }
                 let service = crate::types::get_service_name(port);
                 Port {
                     number: port,
@@ -458,7 +545,9 @@ impl SynScanner {
                     state,
                 }
             })
-            .collect()
+            .collect();
+
+        (scanned_ports, detected_ttl)
     }
 }
 
@@ -487,7 +576,6 @@ mod tests {
         for _ in 0..100 {
             let port = rand_port();
             assert!(port >= 49152, "Port {} should be >= 49152", port);
-            assert!(port <= 65535, "Port {} should be <= 65535", port);
         }
     }
 

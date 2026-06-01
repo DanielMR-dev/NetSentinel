@@ -197,6 +197,7 @@ mod tests {
                 mac: "AA:BB:CC:DD:EE:FF".to_string(),
                 hostname: Some("router.local".to_string()),
                 vendor: Some("TestVendor".to_string()),
+                os: None,
                 status: DeviceStatus::Online,
                 ports: Vec::new(),
                 last_seen: timestamp,

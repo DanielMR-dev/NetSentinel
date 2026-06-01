@@ -76,10 +76,10 @@ fn generate_icmp_identifier() -> u16 {
 /// * `timeout_ms` - Maximum time to wait for a reply in milliseconds
 ///
 /// # Returns
-/// * `Ok(true)` - Host responded with ICMP Echo Reply
-/// * `Ok(false)` - Timeout or host unreachable
+/// * `Ok(Some(ttl))` - Host is alive and responded, returning the packet's TTL
+/// * `Ok(None)` - Timeout or host unreachable
 /// * `Err(ScanError)` - Socket creation or send failure
-fn ping_host_blocking(ip: Ipv4Addr, timeout_ms: u64) -> Result<bool, ScanError> {
+fn ping_host_blocking(ip: Ipv4Addr, timeout_ms: u64) -> Result<Option<u8>, ScanError> {
     let timeout = Duration::from_millis(timeout_ms);
 
     // Create raw ICMP socket
@@ -151,7 +151,7 @@ fn ping_host_blocking(ip: Ipv4Addr, timeout_ms: u64) -> Result<bool, ScanError> 
     loop {
         // Check deadline before each receive
         if Instant::now() >= deadline {
-            return Ok(false);
+            return Ok(None);
         }
 
         // Update remaining timeout on socket
@@ -199,7 +199,7 @@ fn ping_host_blocking(ip: Ipv4Addr, timeout_ms: u64) -> Result<bool, ScanError> 
                             if echo_reply.get_identifier() == identifier
                                 && echo_reply.get_sequence_number() == sequence_number
                             {
-                                return Ok(true); // It's our reply!
+                                return Ok(Some(recv_bytes[8])); // It's our reply! Return the TTL
                             }
                         }
                     }
@@ -210,12 +210,12 @@ fn ping_host_blocking(ip: Ipv4Addr, timeout_ms: u64) -> Result<bool, ScanError> 
             Err(e) => {
                 match e.kind() {
                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
-                        return Ok(false); // Timeout
+                        return Ok(None); // Timeout
                     }
                     // On some systems, ICMP Destination Unreachable comes back as
                     // ConnectionRefused on the raw socket
                     std::io::ErrorKind::ConnectionRefused => {
-                        return Ok(false); // Host unreachable
+                        return Ok(None); // Host unreachable
                     }
                     _ => {
                         return Err(ScanError::NetworkError(format!(
@@ -399,10 +399,11 @@ pub async fn icmp_ping_sweep(
                     tokio::task::spawn_blocking(move || ping_host_blocking(ipv4, timeout)).await;
 
                 let device = match ping_result {
-                    Ok(Ok(true)) => {
+                    Ok(Ok(Some(ttl))) => {
                         // Host is alive — create device
                         let mut device = Device::new(ip_str.clone());
                         device.status = DeviceStatus::Online;
+                        device.os = crate::types::estimate_os_by_ttl(ttl);
 
                         // Try to resolve MAC address via ARP cache
                         let provider = crate::network::platform::create_arp_provider();
@@ -421,7 +422,7 @@ pub async fn icmp_ping_sweep(
                         emit_log(
                             &app,
                             "info",
-                            &format!("ICMP: Host responded: {}", ip_str),
+                            &format!("ICMP: Host responded: {} (TTL={})", ip_str, ttl),
                             Some(&ip_str),
                         )
                         .await;
@@ -432,6 +433,7 @@ pub async fn icmp_ping_sweep(
                             mac: device.mac.clone(),
                             hostname: device.hostname.clone(),
                             vendor: device.vendor.clone(),
+                            os: device.os.clone(),
                             timestamp: chrono::Utc::now().timestamp(),
                             ports: Vec::new(),
                             discovery_method: "IcmpPing".to_string(),
@@ -442,7 +444,7 @@ pub async fn icmp_ping_sweep(
                         devices_found.fetch_add(1, Ordering::SeqCst);
                         Some(device)
                     }
-                    Ok(Ok(false)) => {
+                    Ok(Ok(None)) => {
                         // Timeout — host unreachable, no device
                         None
                     }
@@ -626,9 +628,9 @@ mod tests {
         // or return PermissionDenied if not. Either way, no panic.
         let result = ping_host_blocking(Ipv4Addr::new(127, 0, 0, 1), 500);
         match &result {
-            Ok(alive) => {
-                // If we got a result, it should be a valid boolean
-                assert!(*alive || !*alive);
+            Ok(maybe_ttl) => {
+                // If we got a result, it should be an Option<u8>
+                assert!(maybe_ttl.is_none() || maybe_ttl.is_some());
             }
             Err(ScanError::PermissionDenied(_)) => {
                 // Expected when not running as root

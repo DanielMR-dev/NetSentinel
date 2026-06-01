@@ -9,7 +9,7 @@ use tauri::Emitter;
 
 use crate::error::ScanError;
 use crate::network::oui;
-use crate::types::{Device, DeviceFoundEvent, DeviceStatus, Port, PortState, ScanProgressEvent, ScanStartedEvent};
+use crate::types::{Device, DeviceFoundEvent, DeviceStatus, Port, PortState, ScanProgressEvent};
 
 /// Default maximum concurrent host checks
 const DEFAULT_MAX_CONCURRENT_HOSTS: usize = 50;
@@ -72,14 +72,7 @@ pub async fn discover_hosts(
     let total = ips.len() as u32;
     let scanned = Arc::new(std::sync::atomic::AtomicU32::new(0));
 
-    // Emit scan started event
-    let started_event = ScanStartedEvent {
-        scan_id: uuid::Uuid::new_v4().to_string(),
-        target_cidr: "unknown".to_string(), // Caller should set this properly
-        total_hosts: total,
-        timestamp: chrono::Utc::now().timestamp(),
-    };
-    let _ = app.emit("scan_started", started_event);
+
 
     emit_log(
         &app,
@@ -169,6 +162,7 @@ pub async fn discover_hosts(
                             mac: device.mac.clone(),
                             hostname: device.hostname.clone(),
                             vendor: device.vendor.clone(),
+                            os: device.os.clone(),
                             timestamp: chrono::Utc::now().timestamp(),
                             ports: Vec::new(),
                             discovery_method: "TcpProbe".to_string(),

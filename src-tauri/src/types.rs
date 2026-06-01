@@ -85,6 +85,7 @@ pub struct Device {
     pub mac: String,
     pub hostname: Option<String>,
     pub vendor: Option<String>,
+    pub os: Option<String>,
     pub status: DeviceStatus,
     pub ports: Vec<Port>,
     pub last_seen: i64,
@@ -99,6 +100,7 @@ impl Device {
             mac: String::new(),
             hostname: None,
             vendor: None,
+            os: None,
             status: DeviceStatus::Unknown,
             ports: Vec::new(),
             last_seen: chrono::Utc::now().timestamp(),
@@ -118,6 +120,11 @@ impl Device {
 
     pub fn with_vendor(mut self, vendor: Option<String>) -> Self {
         self.vendor = vendor;
+        self
+    }
+
+    pub fn with_os(mut self, os: Option<String>) -> Self {
+        self.os = os;
         self
     }
 
@@ -156,11 +163,26 @@ pub struct DeviceFoundEvent {
     pub mac: String,
     pub hostname: Option<String>,
     pub vendor: Option<String>,
+    pub os: Option<String>,
     pub timestamp: i64,
     pub ports: Vec<Port>,
     pub discovery_method: String,
     /// Banner grab results for this device
     pub banner_results: Vec<BannerResult>,
+}
+
+/// Estimate operating system based on received packet's TTL value.
+///
+/// Typical ranges:
+/// - ~64 (0-64) -> Linux/Android
+/// - ~128 (65-128) -> Windows
+/// - ~255 (129-255) -> Network Equipment/Others
+pub fn estimate_os_by_ttl(ttl: u8) -> Option<String> {
+    match ttl {
+        0..=64 => Some("Linux/Android".to_string()),
+        65..=128 => Some("Windows".to_string()),
+        129..=255 => Some("Network Device".to_string()),
+    }
 }
 
 /// Event emitted during scan progress
@@ -205,5 +227,20 @@ pub fn get_service_name(port: u16) -> Option<String> {
         8080 => Some("HTTP-ALT".to_string()),
         8443 => Some("HTTPS-ALT".to_string()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_estimate_os_by_ttl() {
+        assert_eq!(estimate_os_by_ttl(64), Some("Linux/Android".to_string()));
+        assert_eq!(estimate_os_by_ttl(45), Some("Linux/Android".to_string()));
+        assert_eq!(estimate_os_by_ttl(128), Some("Windows".to_string()));
+        assert_eq!(estimate_os_by_ttl(100), Some("Windows".to_string()));
+        assert_eq!(estimate_os_by_ttl(255), Some("Network Device".to_string()));
+        assert_eq!(estimate_os_by_ttl(150), Some("Network Device".to_string()));
     }
 }

@@ -18,7 +18,7 @@ pub async fn probe_hosts(
     let sem = Arc::new(Semaphore::new(concurrency_limit));
     let timeout_duration = Duration::from_millis(port_timeout_ms);
 
-    let results: Vec<bool> = stream::iter(ips.clone())
+    let active_ips: Vec<IpAddr> = stream::iter(ips)
         .map(|ip| {
             let sem = sem.clone();
             let timeout_dur = timeout_duration;
@@ -26,7 +26,8 @@ pub async fn probe_hosts(
             async move {
                 let _permit = sem.acquire().await.ok()?;
                 let timeout_ms = timeout_dur.as_millis() as u64;
-                probe_host_alive(ip, timeout_ms).await
+                let alive = probe_host_alive(ip, timeout_ms).await.unwrap_or(false);
+                if alive { Some(ip) } else { None }
             }
         })
         .buffer_unordered(concurrency_limit)
@@ -34,11 +35,7 @@ pub async fn probe_hosts(
         .collect()
         .await;
 
-    results
-        .into_iter()
-        .zip(ips)
-        .filter_map(|(alive, ip)| if alive { Some(ip) } else { None })
-        .collect()
+    active_ips
 }
 
 /// Check if a host is alive by probing common ports

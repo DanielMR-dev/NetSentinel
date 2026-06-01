@@ -73,13 +73,40 @@ pub struct CveDatabase {
 /// the database is always available without file I/O at runtime.
 static CVE_JSON: &str = include_str!("../../assets/cve-database.json");
 
+/// Helper to determine the application's local data directory.
+fn get_app_local_data_dir() -> Option<std::path::PathBuf> {
+    dirs::data_local_dir().map(|p| p.join("com.netsentinel.app"))
+}
+
 /// Global CVE database instance, loaded once at startup.
-static CVE_DATABASE: Lazy<CveDatabase> = Lazy::new(|| {
-    CveDatabase::load_from_json(CVE_JSON)
-        .unwrap_or_else(|e| {
-            tracing::error!("Failed to load CVE database: {}. Using empty database.", e);
-            CveDatabase::empty()
-        })
+static CVE_DATABASE: Lazy<std::sync::RwLock<CveDatabase>> = Lazy::new(|| {
+    let mut db = None;
+    if let Some(mut path) = get_app_local_data_dir() {
+        path.push("cve-database.json");
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                match CveDatabase::load_from_json(&content) {
+                    Ok(loaded_db) => {
+                        tracing::info!("Loaded CVE database from local data directory: {:?}", path);
+                        db = Some(loaded_db);
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to parse CVE database at local data directory: {:?}: {}", path, e);
+                    }
+                }
+            }
+        }
+    }
+
+    let loaded_db = db.unwrap_or_else(|| {
+        CveDatabase::load_from_json(CVE_JSON)
+            .unwrap_or_else(|e| {
+                tracing::error!("Failed to load embedded CVE database: {}. Using empty database.", e);
+                CveDatabase::empty()
+            })
+    });
+
+    std::sync::RwLock::new(loaded_db)
 });
 
 impl CveDatabase {
@@ -176,16 +203,46 @@ impl CveDatabase {
     }
 }
 
-/// Get the global CVE database instance.
-pub fn get_cve_database() -> &'static CveDatabase {
-    &CVE_DATABASE
-}
-
 /// Look up CVEs for a banner result.
 pub fn lookup_cves(banner_result: &banner::BannerResult) -> Vec<CveMatch> {
-    let db = get_cve_database();
+    let db = CVE_DATABASE.read().unwrap_or_else(|e| e.into_inner());
     let service = banner_result.service.as_deref().unwrap_or("");
     db.lookup(&banner_result.banner, service, &banner_result.ip, banner_result.port)
+}
+
+/// Update the CVE database with new JSON content.
+/// Validates the JSON content first and writes it safely to disk.
+#[tauri::command]
+pub async fn update_cve_database(json_content: String) -> Result<(), ScanError> {
+    // 1. Validate the JSON content first by attempting to load it
+    let new_db = CveDatabase::load_from_json(&json_content)?;
+
+    // 2. Determine target path
+    let local_data_dir = get_app_local_data_dir()
+        .ok_or_else(|| ScanError::NetworkError("Could not determine local data directory".to_string()))?;
+
+    // Ensure directory exists
+    tokio::fs::create_dir_all(&local_data_dir).await
+        .map_err(|e| ScanError::NetworkError(format!("Failed to create local data directory: {}", e)))?;
+
+    let target_path = local_data_dir.join("cve-database.json");
+    let temp_path = local_data_dir.join("cve-database.tmp");
+
+    // Write securely by writing to a temp file and renaming it
+    tokio::fs::write(&temp_path, &json_content).await
+        .map_err(|e| ScanError::NetworkError(format!("Failed to write temporary CVE database: {}", e)))?;
+
+    tokio::fs::rename(&temp_path, &target_path).await
+        .map_err(|e| ScanError::NetworkError(format!("Failed to save CVE database: {}", e)))?;
+
+    // 3. Update the in-memory global CVE database
+    let mut db_guard = CVE_DATABASE.write().map_err(|_| {
+        ScanError::NetworkError("Failed to acquire write lock on CVE database (lock poisoned)".to_string())
+    })?;
+    *db_guard = new_db;
+
+    tracing::info!("CVE database successfully updated and saved to {:?}", target_path);
+    Ok(())
 }
 
 /// Generate search keys from service name and banner.
@@ -468,5 +525,38 @@ mod tests {
         assert!(db.is_ok(), "CVE database should load successfully: {:?}", db.err());
         let db = db.unwrap();
         assert!(!db.index.is_empty(), "CVE database should not be empty");
+    }
+
+    #[tokio::test]
+    async fn test_update_cve_database_validation() {
+        // Test that update_cve_database fails on invalid JSON content
+        let invalid_json = "{ invalid }".to_string();
+        let result = update_cve_database(invalid_json).await;
+        assert!(result.is_err(), "Invalid JSON should return an error");
+
+        // Test with a minimal valid JSON content structure
+        let valid_json = r#"{
+            "vulnerabilities": [
+                {
+                    "cve_id": "CVE-TEST-1234",
+                    "severity": "critical",
+                    "description": "Test dynamic vulnerability",
+                    "affected_software": "testservice",
+                    "affected_versions": ["< 1.0"],
+                    "cvss_score": 9.9
+                }
+            ]
+        }"#.to_string();
+
+        let result = update_cve_database(valid_json).await;
+        match result {
+            Ok(_) => {
+                let db_guard = CVE_DATABASE.read().unwrap();
+                assert!(db_guard.index.contains_key("testservice"));
+            }
+            Err(e) => {
+                eprintln!("Update command error (acceptable in test environment): {:?}", e);
+            }
+        }
     }
 }

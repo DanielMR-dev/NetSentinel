@@ -363,6 +363,7 @@ mod tests {
             mac: String::new(),
             hostname: None,
             vendor: None,
+            os: None,
             status: DeviceStatus::Online,
             ports,
             last_seen: 1000,
