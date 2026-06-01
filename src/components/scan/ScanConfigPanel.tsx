@@ -8,8 +8,8 @@ import { Button } from '../common/Button';
 import { TimingTemplateSelector } from './TimingTemplateSelector';
 import { ScanTypeSelector } from './ScanTypeSelector';
 
-// Common ports with service labels for the chip UI
-const COMMON_PORTS: { port: number; label: string }[] = [
+// Common TCP ports with service labels for the chip UI
+const COMMON_TCP_PORTS: { port: number; label: string }[] = [
   { port: 21, label: 'FTP' },
   { port: 22, label: 'SSH' },
   { port: 23, label: 'Telnet' },
@@ -31,11 +31,38 @@ const COMMON_PORTS: { port: number; label: string }[] = [
   { port: 8443, label: '8443' },
 ];
 
-// Port groups for preset buttons
-const PORT_PRESETS: Record<string, number[]> = {
+// Common UDP ports with service labels for the chip UI
+const COMMON_UDP_PORTS: { port: number; label: string }[] = [
+  { port: 53, label: 'DNS' },
+  { port: 67, label: 'DHCP' },
+  { port: 68, label: 'DHCP' },
+  { port: 69, label: 'TFTP' },
+  { port: 123, label: 'NTP' },
+  { port: 161, label: 'SNMP' },
+  { port: 162, label: 'SNMP Trap' },
+  { port: 500, label: 'IKE' },
+  { port: 514, label: 'Syslog' },
+  { port: 1900, label: 'SSDP' },
+  { port: 5353, label: 'mDNS' },
+  { port: 5355, label: 'LLMNR' },
+  { port: 4789, label: 'VXLAN' },
+];
+
+// Default UDP ports for scan
+const DEFAULT_UDP_PORTS = [53, 67, 68, 69, 123, 161, 162, 500, 514, 1900, 5353, 5355, 4789];
+
+// TCP port groups for preset buttons
+const TCP_PORT_PRESETS: Record<string, number[]> = {
   common: [21, 22, 23, 25, 53, 80, 110, 143, 443, 445, 993, 995, 3306, 3389, 5432, 5900],
   web: [80, 443, 8080, 8443],
   database: [3306, 5432, 6379, 27017],
+};
+
+// UDP port groups for preset buttons
+const UDP_PORT_PRESETS: Record<string, number[]> = {
+  common: DEFAULT_UDP_PORTS,
+  infrastructure: [53, 67, 68, 123, 161, 162],
+  discovery: [1900, 5353, 5355],
 };
 
 /** Parse a port range string like "8000-8100" or single port "8080" into an array of port numbers */
@@ -85,10 +112,16 @@ export const ScanConfigPanel: React.FC = () => {
   const error = useScanStore((s) => s.error);
   const clearError = useScanStore((s) => s.clearError);
 
+  const scanType = useScanStore((s) => s.scanType);
   const capabilities = useCapabilitiesStore((s) => s.capabilities);
   const settings = useSettingsStore((s) => s.settings);
   const discoveryMethods = settings.scanConfig.discoveryMethods;
   const syncFromSettings = useScanStore((s) => s.syncFromSettings);
+
+  // Switch between TCP and UDP port lists based on scan type
+  const isUdpScan = scanType === 'udp';
+  const commonPorts = isUdpScan ? COMMON_UDP_PORTS : COMMON_TCP_PORTS;
+  const portPresets = isUdpScan ? UDP_PORT_PRESETS : TCP_PORT_PRESETS;
 
   // Sync scan config from the active settings profile on profile change
   useEffect(() => {
@@ -112,11 +145,11 @@ export const ScanConfigPanel: React.FC = () => {
 
   const selectedPortsSet = useMemo(() => new Set(selectedPorts), [selectedPorts]);
 
-  // Ports that are selected but not in the COMMON_PORTS list (custom ports)
+  // Ports that are selected but not in the common ports list (custom ports)
   const customSelectedPorts = useMemo(() => {
-    const commonPortNumbers = new Set(COMMON_PORTS.map((c) => c.port));
+    const commonPortNumbers = new Set(commonPorts.map((c) => c.port));
     return selectedPorts.filter((p) => !commonPortNumbers.has(p)).sort((a, b) => a - b);
-  }, [selectedPorts]);
+  }, [selectedPorts, commonPorts]);
 
   const handleCidrChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setCidr(e.target.value);
@@ -127,11 +160,11 @@ export const ScanConfigPanel: React.FC = () => {
   }, [setTimeoutMs]);
 
   const handlePresetClick = useCallback((preset: string) => {
-    const ports = PORT_PRESETS[preset];
+    const ports = portPresets[preset];
     if (ports) {
       setSelectedPorts(ports);
     }
-  }, [setSelectedPorts]);
+  }, [setSelectedPorts, portPresets]);
 
   const handleTogglePort = useCallback((port: number) => {
     const current = useScanStore.getState().selectedPorts;
@@ -289,7 +322,7 @@ export const ScanConfigPanel: React.FC = () => {
             <div className="absolute top-full left-0 mt-2 w-96 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700/50 rounded-xl shadow-xl z-10 p-4">
               {/* Preset buttons */}
               <div className="flex gap-2 mb-3">
-                {Object.keys(PORT_PRESETS).map((name) => (
+                {Object.keys(portPresets).map((name) => (
                   <button
                     key={name}
                     type="button"
@@ -303,7 +336,7 @@ export const ScanConfigPanel: React.FC = () => {
 
               {/* Common port chips */}
               <div className="flex flex-wrap gap-1.5 mb-3">
-                {COMMON_PORTS.map(({ port, label }) => {
+                {commonPorts.map(({ port, label }) => {
                   const isSelected = selectedPortsSet.has(port);
                   return (
                     <button
@@ -315,7 +348,9 @@ export const ScanConfigPanel: React.FC = () => {
                           'px-2 py-1 rounded-lg text-xs font-medium transition-all duration-150',
                           'hover:scale-105 active:scale-95',
                           isSelected
-                            ? 'bg-gradient-to-b from-blue-600 to-blue-700 text-white shadow-md'
+                            ? isUdpScan
+                              ? 'bg-gradient-to-b from-purple-600 to-purple-700 text-white shadow-md'
+                              : 'bg-gradient-to-b from-blue-600 to-blue-700 text-white shadow-md'
                             : 'bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-200'
                         )
                       )}
@@ -364,7 +399,9 @@ export const ScanConfigPanel: React.FC = () => {
                         className={twMerge(
                           clsx(
                             'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium',
-                            'bg-blue-50 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700/50'
+                            isUdpScan
+                              ? 'bg-purple-50 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-700/50'
+                              : 'bg-blue-50 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700/50'
                           )
                         )}
                       >
@@ -372,7 +409,14 @@ export const ScanConfigPanel: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => handleRemovePort(port)}
-                          className="text-blue-500 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-200 transition-colors"
+                          className={twMerge(
+                            clsx(
+                              'transition-colors',
+                              isUdpScan
+                                ? 'text-purple-500 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-200'
+                                : 'text-blue-500 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-200'
+                            )
+                          )}
                           aria-label={`Remove port ${port}`}
                         >
                           &times;

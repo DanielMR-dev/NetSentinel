@@ -6,8 +6,9 @@ import { useBannerStore } from '../../stores/bannerStore';
 import type { Device, Port } from '../../types/device';
 import { BannerPanel } from './BannerPanel';
 import { CveAlertPanel } from './CveAlertPanel';
+import { TlsInfoPanel } from './TlsInfoPanel';
 
-type DetailTab = 'ports' | 'services' | 'vulnerabilities';
+type DetailTab = 'ports' | 'services' | 'tls' | 'vulnerabilities';
 
 interface DeviceDetailPanelProps {
   device: Device;
@@ -25,6 +26,11 @@ export const DeviceDetailPanel: React.FC<DeviceDetailPanelProps> = ({ device }) 
 
   const hostBanners = useMemo(() => banners.get(device.ip) ?? [], [banners, device.ip]);
   const hostCveAlerts = useMemo(() => cveAlerts.filter((a) => a.ip === device.ip), [cveAlerts, device.ip]);
+  const tlsCount = useMemo(() => hostBanners.filter((b) => b.tlsInfo !== null).length, [hostBanners]);
+  const hasTlsData = tlsCount > 0;
+
+  // Derive effective tab: fall back to 'ports' if active tab is unavailable
+  const effectiveTab: DetailTab = activeTab === 'tls' && !hasTlsData ? 'ports' : activeTab;
 
   const handleTabChange = useCallback((tab: DetailTab) => {
     setActiveTab(tab);
@@ -97,29 +103,38 @@ export const DeviceDetailPanel: React.FC<DeviceDetailPanelProps> = ({ device }) 
           id="ports"
           label="Ports"
           count={openPorts.length}
-          isActive={activeTab === 'ports'}
+          isActive={effectiveTab === 'ports'}
           onClick={handleTabChange}
         />
         <TabButton
           id="services"
           label="Services"
           count={hostBanners.length}
-          isActive={activeTab === 'services'}
+          isActive={effectiveTab === 'services'}
           onClick={handleTabChange}
         />
+        {hasTlsData && (
+          <TabButton
+            id="tls"
+            label="TLS"
+            count={tlsCount}
+            isActive={effectiveTab === 'tls'}
+            onClick={handleTabChange}
+          />
+        )}
         <TabButton
           id="vulnerabilities"
           label="CVEs"
           count={hostCveAlerts.length}
-          isActive={activeTab === 'vulnerabilities'}
+          isActive={effectiveTab === 'vulnerabilities'}
           onClick={handleTabChange}
           alertCount={hostCveAlerts.length}
         />
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-y-auto" role="tabpanel" aria-label={`${activeTab} tab content`}>
-        {activeTab === 'ports' && (
+      <div className="flex-1 overflow-y-auto" role="tabpanel" aria-label={`${effectiveTab} tab content`}>
+        {effectiveTab === 'ports' && (
           <div className="p-4 space-y-4">
             {/* Open Ports */}
             <section>
@@ -129,7 +144,7 @@ export const DeviceDetailPanel: React.FC<DeviceDetailPanelProps> = ({ device }) 
               {openPorts.length > 0 ? (
                 <div className="space-y-1">
                   {openPorts.map((port) => (
-                    <PortRow key={port.number} port={port} />
+                    <PortRow key={`${port.protocol}-${port.number}`} port={port} />
                   ))}
                 </div>
               ) : (
@@ -145,7 +160,7 @@ export const DeviceDetailPanel: React.FC<DeviceDetailPanelProps> = ({ device }) 
                 </h3>
                 <div className="space-y-1">
                   {filteredPorts.slice(0, 10).map((port) => (
-                    <PortRow key={port.number} port={port} />
+                    <PortRow key={`${port.protocol}-${port.number}`} port={port} />
                   ))}
                   {filteredPorts.length > 10 && (
                     <p className="text-xs text-gray-400 dark:text-gray-600">+{filteredPorts.length - 10} more</p>
@@ -177,9 +192,11 @@ export const DeviceDetailPanel: React.FC<DeviceDetailPanelProps> = ({ device }) 
           </div>
         )}
 
-        {activeTab === 'services' && <BannerPanel ip={device.ip} />}
+        {effectiveTab === 'services' && <BannerPanel ip={device.ip} />}
 
-        {activeTab === 'vulnerabilities' && <CveAlertPanel ip={device.ip} />}
+        {effectiveTab === 'tls' && <TlsInfoPanel ip={device.ip} />}
+
+        {effectiveTab === 'vulnerabilities' && <CveAlertPanel ip={device.ip} />}
       </div>
     </div>
   );
@@ -242,24 +259,45 @@ interface PortRowProps {
   port: Port;
 }
 
-const PortRow: React.FC<PortRowProps> = ({ port }) => (
-  <div className="flex items-center justify-between py-1 px-2 bg-gray-50 dark:bg-gray-750 rounded">
-    <div className="flex items-center gap-2">
-      <span className="text-blue-600 dark:text-blue-400 font-mono font-medium">{port.number}</span>
-      <span className="text-gray-500 dark:text-gray-500 text-sm">/{port.protocol}</span>
-      {port.service && <span className="text-gray-500 dark:text-gray-400 text-sm">({port.service})</span>}
+const PortRow: React.FC<PortRowProps> = ({ port }) => {
+  const isUdp = port.protocol === 'udp';
+  return (
+    <div className="flex items-center justify-between py-1 px-2 bg-gray-50 dark:bg-gray-750 rounded">
+      <div className="flex items-center gap-2">
+        <span className={twMerge(
+          clsx(
+            'font-mono font-medium',
+            isUdp ? 'text-purple-600 dark:text-purple-400' : 'text-blue-600 dark:text-blue-400'
+          )
+        )}>
+          {port.number}
+        </span>
+        <span
+          className={twMerge(
+            clsx(
+              'text-[10px] font-bold px-1.5 py-0.5 rounded',
+              isUdp
+                ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300'
+                : 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
+            )
+          )}
+        >
+          {port.protocol.toUpperCase()}
+        </span>
+        {port.service && <span className="text-gray-500 dark:text-gray-400 text-sm">({port.service})</span>}
+      </div>
+      <span
+        className={twMerge(
+          clsx(
+            'text-xs px-2 py-0.5 rounded',
+            port.state === 'open' && 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-400',
+            port.state === 'closed' && 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-400',
+            port.state === 'filtered' && 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-400'
+          )
+        )}
+      >
+        {port.state}
+      </span>
     </div>
-    <span
-      className={twMerge(
-        clsx(
-          'text-xs px-2 py-0.5 rounded',
-          port.state === 'open' && 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-400',
-          port.state === 'closed' && 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-400',
-          port.state === 'filtered' && 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-400'
-        )
-      )}
-    >
-      {port.state}
-    </span>
-  </div>
-);
+  );
+};

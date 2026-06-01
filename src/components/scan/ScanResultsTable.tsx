@@ -445,18 +445,31 @@ const DeviceRow: React.FC<DeviceRowProps> = React.memo(({ device, isSelected, on
           {device.ports
             .filter((p) => p.state === 'open')
             .slice(0, 5)
-            .map((port) => (
-              <span
-                key={port.number}
-                className="px-2 py-0.5 bg-green-50 dark:bg-green-900/50 text-green-700 dark:text-green-400 text-xs rounded"
-                title={port.service ?? `Port ${port.number}`}
-              >
-                {port.number}
-                {port.service && (
-                  <span className="ml-1 text-green-600 dark:text-green-400/70">{port.service}</span>
-                )}
-              </span>
-            ))}
+            .map((port) => {
+              const isUdp = port.protocol === 'udp';
+              return (
+                <span
+                  key={`${port.protocol}-${port.number}`}
+                  className={twMerge(
+                    clsx(
+                      'px-2 py-0.5 text-xs rounded',
+                      isUdp
+                        ? 'bg-purple-50 dark:bg-purple-900/50 text-purple-700 dark:text-purple-400'
+                        : 'bg-green-50 dark:bg-green-900/50 text-green-700 dark:text-green-400'
+                    )
+                  )}
+                  title={`${port.protocol.toUpperCase()}: ${port.service ?? `Port ${port.number}`}`}
+                >
+                  {port.number}
+                  {isUdp && (
+                    <span className="ml-0.5 text-purple-500 dark:text-purple-400/70 text-[10px] font-medium">U</span>
+                  )}
+                  {port.service && (
+                    <span className={clsx('ml-1', isUdp ? 'text-purple-600 dark:text-purple-400/70' : 'text-green-600 dark:text-green-400/70')}>{port.service}</span>
+                  )}
+                </span>
+              );
+            })}
           {openPortCount > 5 && (
             <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 text-xs rounded">
               +{openPortCount - 5} more

@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import type { Baseline, BaselineDiff } from '../types/device';
 
 interface BaselineState {
@@ -88,24 +87,6 @@ export const useBaselineStore = create<BaselineStore>((set) => ({
     set({ error: null });
   },
 }));
-
-// Event listener for baseline_diff_result
-let unlistenBaselineDiff: (() => void) | null = null;
-
-export async function setupBaselineEventListeners() {
-  cleanupBaselineEventListeners();
-
-  unlistenBaselineDiff = await listen<BaselineDiff>('baseline_diff_result', (event) => {
-    useBaselineStore.setState({ currentDiff: event.payload });
-  });
-}
-
-export function cleanupBaselineEventListeners() {
-  if (unlistenBaselineDiff) {
-    unlistenBaselineDiff();
-    unlistenBaselineDiff = null;
-  }
-}
 
 // Selector hooks
 export const useBaselines = () => useBaselineStore((s) => s.baselines);

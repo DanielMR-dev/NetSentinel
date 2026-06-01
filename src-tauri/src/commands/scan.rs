@@ -358,7 +358,11 @@ pub async fn start_scan(
         let discovered_devices = state_clone.get_devices().await;
         let ports_to_scan = if scan_ports {
             if ports.is_empty() {
-                host_discovery::DEFAULT_PORTS.to_vec()
+                // Use protocol-appropriate default ports based on scan type
+                match scan_type_clone {
+                    ScanType::Udp => crate::network::udp_scan::DEFAULT_UDP_PORTS.to_vec(),
+                    _ => host_discovery::DEFAULT_PORTS.to_vec(),
+                }
             } else {
                 ports.clone()
             }
@@ -438,6 +442,15 @@ pub async fn start_scan(
                     ScanType::Connect => {
                         host_discovery::scan_ports(ip_addr, &ports_to_scan, timeout_ms).await
                     }
+                    ScanType::Udp => {
+                        emit_log(
+                            &app_arc,
+                            "info",
+                            &format!("Performing UDP scan on {} ports for {}", ports_to_scan.len(), device.ip),
+                            Some(&device.ip),
+                        ).await;
+                        crate::network::udp_scan::scan_udp_ports(ip_addr, &ports_to_scan, timeout_ms).await
+                    }
                 };
 
                 let mut updated_device = device.clone();
@@ -446,14 +459,14 @@ pub async fn start_scan(
                     updated_device.os = os_estimate;
                 }
 
-                // Grab service banners for open ports
+                // Grab service banners for open ports (TCP only — UDP banners not supported)
                 let open_ports: Vec<u16> = updated_device.ports
                     .iter()
                     .filter(|p| p.state == crate::types::PortState::Open)
                     .map(|p| p.number)
                     .collect();
 
-                if !open_ports.is_empty() && state_clone.is_running() {
+                if !open_ports.is_empty() && state_clone.is_running() && scan_type_clone != ScanType::Udp {
                     emit_log(
                         &app_arc,
                         "info",
@@ -462,8 +475,37 @@ pub async fn start_scan(
                     ).await;
 
                     let grabber = crate::network::banner::BannerGrabber::new(Duration::from_millis(timeout_ms));
-                    let banner_results = grabber.grab_banners(&device.ip, &open_ports).await;
-                    
+                    let mut banner_results = grabber.grab_banners(&device.ip, &open_ports).await;
+
+                    // TLS certificate analysis for TLS-capable ports
+                    for banner in &mut banner_results {
+                        if crate::network::tls::is_tls_port(banner.port) {
+                            match crate::network::tls::analyze_tls(
+                                &device.ip,
+                                banner.port,
+                                Duration::from_millis(timeout_ms),
+                            )
+                            .await
+                            {
+                                Ok(tls_info) => {
+                                    banner.tls_info = Some(tls_info);
+                                }
+                                Err(e) => {
+                                    emit_log(
+                                        &app_arc,
+                                        "debug",
+                                        &format!(
+                                            "TLS analysis failed for {}:{}: {}",
+                                            device.ip, banner.port, e
+                                        ),
+                                        Some(&device.ip),
+                                    )
+                                    .await;
+                                }
+                            }
+                        }
+                    }
+
                     // Match CVEs for grabbed banners
                     let mut matched_cves = Vec::new();
                     for banner in &banner_results {
@@ -472,7 +514,12 @@ pub async fn start_scan(
                     }
 
                     updated_device.banner_results = banner_results;
-                    
+
+                    // Emit individual banner_found events for real-time frontend updates
+                    for banner in &updated_device.banner_results {
+                        let _ = app_arc.emit("banner_found", banner);
+                    }
+
                     // Emit CVE alerts if found
                     if !matched_cves.is_empty() {
                         emit_log(

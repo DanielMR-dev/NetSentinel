@@ -79,31 +79,3 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 }
 
-// Helper to check if a value is null or undefined
-export function isNullOrUndefined<T>(value: T | null | undefined): value is null | undefined {
-  return value === null || value === undefined;
-}
-
-// Helper to safely access nested properties
-export function safeAccess<T, K extends keyof T>(
-  obj: T | null | undefined,
-  key: K
-): T[K] | undefined {
-  if (isNullOrUndefined(obj)) return undefined;
-  return obj[key];
-}
-
-// Safe getter for settings that ensures defaults
-export function getSafeSettings<T extends { scanConfig?: unknown; uiPreferences?: unknown }>(
-  settings: T | null | undefined,
-  defaults: { scanConfig: NonNullable<T['scanConfig']>; uiPreferences: NonNullable<T['uiPreferences']> }
-): { scanConfig: NonNullable<T['scanConfig']>; uiPreferences: NonNullable<T['uiPreferences']> } {
-  if (isNullOrUndefined(settings)) {
-    return defaults;
-  }
-
-  return {
-    scanConfig: settings.scanConfig ?? defaults.scanConfig,
-    uiPreferences: settings.uiPreferences ?? defaults.uiPreferences,
-  };
-}

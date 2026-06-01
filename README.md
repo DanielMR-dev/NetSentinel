@@ -1,48 +1,78 @@
-# NetSentinel 🛡️
+# NetSentinel
 
-NetSentinel is a native desktop application focused on local network auditing, control, and surveillance. Designed with a strategic vision for Blue/Purple Team roles and SOC analysis, the tool leverages the power of Tauri to unify an agile React frontend with a highly performant and secure Rust backend.
+NetSentinel is a cross-platform desktop application for **network discovery, security auditing, and infrastructure monitoring**. Built for Blue Team, Purple Team, and SOC analysts, it combines a high-performance Rust scanning engine with a modern React interface to deliver real-time network intelligence without leaving your desktop.
 
-## 🚀 Key Features
+## Features
 
-* **Host Discovery (Phase 1):** Identification of live devices on the local network using ARP sweeps and Ping (ICMP) scans.
-* **Port Scanning (Phase 2):** Exploration of active services through TCP Connect scans on common ports (21, 22, 80, 443, etc.).
-* **Visual Topology Mapping (Phase 3):** Interactive graphical representation of the network topology using React Flow, connecting discovered devices to a central node.
-* **Security & Performance:** By utilizing a Rust engine on the backend, the application asynchronously manages thousands of network requests without blocking the UI, while guaranteeing memory safety.
+### Host Discovery
+- **ARP Sweep** — Layer 2 discovery via raw Ethernet frames (requires elevated privileges)
+- **ARP Table** — Passive discovery from the system ARP cache (no privileges needed)
+- **ICMP Ping Sweep** — Raw socket ICMP Echo Request scanning with privilege-aware fallback
+- **TCP Probe** — Concurrent TCP connect probes on common service ports
 
-## 🛠️ Tech Stack
+### Port Scanning
+- **TCP Connect Scan** — Full TCP handshake scanning (no privileges required)
+- **TCP SYN Stealth Scan** — Half-open scanning via raw packet injection (requires root/CAP_NET_RAW)
+- **UDP Scan** — ICMP Port Unreachable-based UDP port discovery on critical services (DNS, DHCP, NTP, SNMP, etc.)
+- **Nmap-style Timing Templates** — T0 (Paranoid) through T5 (Insane) for IDS evasion or maximum speed
 
-### Frontend (UI & State)
-* **Framework:** React 19 + TypeScript
-* **Styling:** Tailwind CSS
-* **State Management:** Zustand (dynamic state) + Zod (data validation)
-* **Visualization:** React Flow
+### Service Identification
+- **Banner Grabbing** — Protocol-aware probes for SSH, HTTP, SMTP, FTP, MySQL, PostgreSQL, RDP, and more
+- **TLS/SSL Analysis** — Certificate inspection including version, cipher suite, issuer, expiry, self-signed detection, and SAN domain enumeration
+- **OS Fingerprinting** — TTL-based OS estimation from response packets
+- **OUI Vendor Lookup** — MAC address manufacturer identified from a 1,000+ entry IEEE OUI database
 
-### Backend (Core & Networking)
-* **Language:** Rust
-* **Desktop Framework:** Tauri
-* **Concurrency:** Tokio (async runtime)
-* **Networking:** pnet (and other Rust crates for packet manipulation)
-* **Communication:** Tauri IPC (Inter-Process Communication)
+### Vulnerability Assessment
+- **Offline CVE Matching** — 130+ CVE entries matched against discovered service banners
+- **Real-time CVE Alerts** — Severity-classified alerts (Critical/High/Medium/Low) with CVSS scores
+- **TLS Certificate Warnings** — Expired, self-signed, and weak cipher suite detection
 
-## 🤖 AI-Driven Development Architecture
+### Network Intelligence
+- **Interactive Topology** — ReactFlow-based graph with drag, zoom, clustering by subnet/vendor, and minimap
+- **Baseline Snapshots** — Save network state as SQLite-backed baselines and diff against future scans
+- **Scan History** — Persistent log of past scans with device details and re-run capability
+- **Audit Export** — CSV and JSON export with native file dialog
 
-This project utilizes an AI-assisted development model through a system of specialized agents:
-* **Planners (Frontend/Backend):** Software architects who define interfaces, state management, and data structures before implementation.
-* **Developers (Frontend/Backend):** Responsible for writing strict, memory-safe code based on architectural guidelines.
-* **Reviewers (Frontend/Backend):** Code auditors focused on performance, memory leaks, thread blocking, and security vulnerabilities.
+### User Experience
+- **Dark/Light Theme** — System-aware with manual toggle
+- **Keyboard Shortcuts** — Full keyboard navigation (Ctrl+S scan, Ctrl+F search, Ctrl+1-5 tabs)
+- **Accessible UI** — WAI-ARIA compliant with screen reader support and focus management
+- **Settings Profiles** — Persistent scan configurations with CRUD management
+- **Real-time Progress** — Live progress bar, device count, and auto-scrolling scan logs
 
-## 🔧 Build from Source
+## Tech Stack
+
+| Layer | Technologies |
+|-------|-------------|
+| **Frontend** | React 19, TypeScript (strict), Tailwind CSS, Zustand, ReactFlow |
+| **Backend** | Rust, Tauri v2, Tokio (async), pnet, socket2, rusqlite |
+| **Transport** | Tauri IPC (`invoke`) + Tauri Events (`emit`/`listen`) |
+| **Testing** | Rust unit tests (150+), Vitest (frontend) |
+
+## Architecture
+
+```
+NetSentinel General (Orchestrator)
+├── Backend Pipeline
+│   ├── Planner    → Rust architecture, data structures, concurrency
+│   ├── Developer  → Safe, concurrent network scanning implementation
+│   └── Reviewer   → Panic/unsafe/deadlock auditing
+└── Frontend Pipeline
+    ├── Planner    → Component trees, Zustand stores, IPC contracts
+    ├── Developer  → React/TypeScript implementation
+    └── Reviewer   → Memory leak, accessibility, performance auditing
+```
+
+## Build from Source
 
 ### Prerequisites
 
 | Dependency | Version | Purpose |
 |------------|---------|---------|
-| Node.js | ≥18.0 | Frontend runtime |
-| pnpm | ≥8.0 | Package manager |
-| Rust | ≥1.77.2 | Backend runtime |
-| GCC/Clang | Recent | C compiler for Rust crates |
-
-#### System-specific requirements:
+| Node.js | >= 18.0 | Frontend runtime |
+| pnpm | >= 8.0 | Package manager |
+| Rust | >= 1.77.2 | Backend runtime |
+| GCC/Clang | Recent | C compiler for native crates |
 
 **Ubuntu/Debian:**
 ```bash
@@ -57,34 +87,37 @@ sudo dnf install dbus-devel pkgconf-pkg-config gtk3-devel webkit2gtk4.1-devel
 ### Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/your-username/NetSentinel.git
 cd NetSentinel
-
-# Install frontend dependencies
 pnpm install
-
-# Build the frontend
 pnpm build
 ```
 
 ### Development
 
 ```bash
-# Run in development mode (frontend + Tauri)
+# Standard development mode
 pnpm tauri dev
 
-# Or run frontend only (no desktop window)
-pnpm dev
+# With elevated privileges (for SYN scan, ICMP, ARP sweep)
+sudo -E ./dev-elevated.sh
+```
+
+### Testing
+
+```bash
+# Backend tests
+cd src-tauri && cargo test
+
+# Frontend tests
+pnpm test
 ```
 
 ### Production Build
 
 ```bash
-# Build for release
 pnpm tauri build
-
-# Output will be in src-tauri/target/release/bundle/
+# Output: src-tauri/target/release/bundle/
 ```
 
 ### Environment Variables
@@ -94,11 +127,21 @@ pnpm tauri build
 | `GDK_BACKEND` | wayland | Force X11 backend if Wayland issues occur |
 | `RUST_BACKTRACE` | 1 | Enable Rust stack traces for debugging |
 
-**Force X11 on Wayland session:**
-```bash
-GDK_BACKEND=x11 pnpm tauri dev
-```
+## Privilege Levels
 
-## 📄 License
+| Level | Capabilities |
+|-------|-------------|
+| **Standard User** | TCP Connect scan, ARP table discovery, banner grabbing, CVE matching |
+| **Elevated (root/Admin)** | SYN stealth scan, ICMP ping sweep, active ARP sweep |
 
-This project is open-source and intended for educational and portfolio demonstration purposes.
+The application gracefully degrades: features requiring elevated privileges automatically fall back to unprivileged alternatives.
+
+## Supported Platforms
+
+- **Linux** — Full support (ARP via `/proc/net/arp`, gateway via `/proc/net/route`)
+- **Windows** — Full support (ARP via `arp -a`, gateway via `route print`)
+- **macOS** — Full support (ARP via `arp -a`, gateway via `route -n get default`)
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

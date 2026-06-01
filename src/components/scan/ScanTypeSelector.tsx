@@ -22,6 +22,11 @@ const SCAN_TYPE_OPTIONS: ScanTypeOption[] = [
     label: 'SYN Stealth',
     description: 'Half-open scan. Faster, harder to detect. Requires elevated privileges.',
   },
+  {
+    id: 'udp',
+    label: 'UDP Scan',
+    description: 'ICMP-based UDP port discovery. DNS, DHCP, NTP, SNMP, and more.',
+  },
 ];
 
 export const ScanTypeSelector: React.FC = () => {

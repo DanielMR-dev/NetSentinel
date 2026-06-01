@@ -1,8 +1,8 @@
 //! OUI (Organizationally Unique Identifier) vendor lookup module.
 //!
 //! Extracts the first 3 octets (6 hex characters) from a MAC address
-//! and looks up the manufacturer/vendor from a built-in table of the
-//! top 50 most common OUI prefixes.
+//! and looks up the manufacturer/vendor from a built-in table of
+//! ~1150 OUI prefixes across 40+ vendors commonly found on modern networks.
 
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
@@ -14,7 +14,7 @@ use std::collections::HashMap;
 ///
 /// Each OUI prefix is assigned to exactly one vendor based on IEEE assignments.
 static OUI_TABLE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
-    let mut m = HashMap::with_capacity(256);
+    let mut m = HashMap::with_capacity(1200);
 
     // Apple
     m.insert("00:03:93", "Apple");
@@ -835,6 +835,369 @@ static OUI_TABLE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m.insert("D8:80:3C", "Microchip");
     m.insert("F8:F0:05", "Microchip");
 
+    // Linksys
+    m.insert("00:0C:41", "Linksys");
+    m.insert("00:0F:66", "Linksys");
+    m.insert("00:12:17", "Linksys");
+    m.insert("00:13:10", "Linksys");
+    m.insert("00:14:BF", "Linksys");
+    m.insert("00:16:B6", "Linksys");
+    m.insert("00:18:39", "Linksys");
+    m.insert("00:18:F8", "Linksys");
+    m.insert("00:1A:70", "Linksys");
+    m.insert("00:1C:10", "Linksys");
+    m.insert("00:1D:7E", "Linksys");
+    m.insert("00:1E:E5", "Linksys");
+    m.insert("00:21:29", "Linksys");
+    m.insert("00:22:6B", "Linksys");
+    m.insert("00:23:69", "Linksys");
+    m.insert("00:25:9C", "Linksys");
+    m.insert("20:AA:4B", "Linksys");
+    m.insert("58:6D:8F", "Linksys");
+    m.insert("C0:C1:C0", "Linksys");
+    m.insert("C0:56:27", "Linksys");
+
+    // D-Link
+    m.insert("00:05:5D", "D-Link");
+    m.insert("00:0D:88", "D-Link");
+    m.insert("00:0F:3D", "D-Link");
+    m.insert("00:11:95", "D-Link");
+    m.insert("00:13:46", "D-Link");
+    m.insert("00:15:E9", "D-Link");
+    m.insert("00:17:9A", "D-Link");
+    m.insert("00:19:5B", "D-Link");
+    m.insert("00:1B:11", "D-Link");
+    m.insert("00:1C:F0", "D-Link");
+    m.insert("00:1E:58", "D-Link");
+    m.insert("00:21:91", "D-Link");
+    m.insert("00:22:B0", "D-Link");
+    m.insert("00:24:01", "D-Link");
+    m.insert("00:26:5A", "D-Link");
+    m.insert("14:D6:4D", "D-Link");
+    m.insert("1C:7E:E5", "D-Link");
+    m.insert("28:10:7B", "D-Link");
+    m.insert("34:08:04", "D-Link");
+    m.insert("84:C9:B2", "D-Link");
+
+    // Ubiquiti
+    m.insert("00:15:6D", "Ubiquiti");
+    m.insert("00:27:22", "Ubiquiti");
+    m.insert("04:18:D6", "Ubiquiti");
+    m.insert("18:E8:29", "Ubiquiti");
+    m.insert("24:5A:4C", "Ubiquiti");
+    m.insert("24:A4:3C", "Ubiquiti");
+    m.insert("2C:B6:9D", "Ubiquiti");
+    m.insert("68:72:51", "Ubiquiti");
+    m.insert("70:A7:41", "Ubiquiti");
+    m.insert("74:83:C2", "Ubiquiti");
+    m.insert("78:8A:20", "Ubiquiti");
+    m.insert("80:2A:A8", "Ubiquiti");
+    m.insert("B4:FB:E4", "Ubiquiti");
+    m.insert("D0:12:42", "Ubiquiti");
+    m.insert("D0:21:F9", "Ubiquiti");
+    m.insert("DC:9F:DB", "Ubiquiti");
+    m.insert("E4:38:83", "Ubiquiti");
+    m.insert("EC:5C:68", "Ubiquiti");
+    m.insert("F0:9F:C2", "Ubiquiti");
+    m.insert("FC:EC:DA", "Ubiquiti");
+
+    // MikroTik
+    m.insert("00:0C:42", "MikroTik");
+    m.insert("00:18:73", "MikroTik");
+    m.insert("00:23:47", "MikroTik");
+    m.insert("04:8B:42", "MikroTik");
+    m.insert("08:55:31", "MikroTik");
+    m.insert("18:FD:74", "MikroTik");
+    m.insert("2C:C8:1B", "MikroTik");
+    m.insert("40:40:28", "MikroTik");
+    m.insert("48:8F:5A", "MikroTik");
+    m.insert("4C:5E:0C", "MikroTik");
+    m.insert("6C:3B:6B", "MikroTik");
+    m.insert("74:4D:28", "MikroTik");
+    m.insert("78:9A:18", "MikroTik");
+    m.insert("8C:09:F4", "MikroTik");
+    m.insert("94:28:2E", "MikroTik");
+    m.insert("A4:2B:B0", "MikroTik");
+    m.insert("B8:69:F4", "MikroTik");
+    m.insert("CC:2D:21", "MikroTik");
+    m.insert("E4:8D:8C", "MikroTik");
+
+    // Microsoft (Surface/Xbox)
+    m.insert("00:0D:3A", "Microsoft");
+    m.insert("00:12:5A", "Microsoft");
+    m.insert("00:17:FA", "Microsoft");
+    m.insert("00:1D:D8", "Microsoft");
+    m.insert("00:22:48", "Microsoft");
+    m.insert("00:25:AE", "Microsoft");
+    m.insert("28:18:78", "Microsoft");
+    m.insert("30:59:B7", "Microsoft");
+    m.insert("4C:0B:BE", "Microsoft");
+    m.insert("50:1A:C5", "Microsoft");
+    m.insert("58:82:A8", "Microsoft");
+    m.insert("60:45:BD", "Microsoft");
+    m.insert("7C:1E:52", "Microsoft");
+    m.insert("7C:ED:8D", "Microsoft");
+    m.insert("98:5F:D3", "Microsoft");
+    m.insert("B4:AE:2B", "Microsoft");
+    m.insert("C4:9D:ED", "Microsoft");
+
+    // Sony (PlayStation)
+    m.insert("00:01:4A", "Sony");
+    m.insert("00:04:1F", "Sony");
+    m.insert("00:0E:07", "Sony");
+    m.insert("00:13:15", "Sony");
+    m.insert("00:15:C1", "Sony");
+    m.insert("00:19:63", "Sony");
+    m.insert("00:1A:80", "Sony");
+    m.insert("00:1E:A4", "Sony");
+    m.insert("00:24:8D", "Sony");
+    m.insert("00:EB:2D", "Sony");
+    m.insert("20:54:76", "Sony");
+    m.insert("30:17:C8", "Sony");
+    m.insert("3C:07:71", "Sony");
+    m.insert("40:B8:37", "Sony");
+    m.insert("5C:E8:EB", "Sony");
+    m.insert("70:71:BC", "Sony");
+    m.insert("84:CF:BF", "Sony");
+    m.insert("94:53:30", "Sony");
+    m.insert("A8:60:B6", "Sony");
+    m.insert("FC:0F:E6", "Sony");
+
+    // Nintendo
+    m.insert("00:09:BF", "Nintendo");
+    m.insert("00:16:56", "Nintendo");
+    m.insert("00:17:AB", "Nintendo");
+    m.insert("00:1A:E9", "Nintendo");
+    m.insert("00:1B:EA", "Nintendo");
+    m.insert("00:1C:BE", "Nintendo");
+    m.insert("00:1D:BC", "Nintendo");
+    m.insert("00:1E:35", "Nintendo");
+    m.insert("00:1F:32", "Nintendo");
+    m.insert("00:21:BD", "Nintendo");
+    m.insert("00:22:AA", "Nintendo");
+    m.insert("00:23:CC", "Nintendo");
+    m.insert("00:24:44", "Nintendo");
+    m.insert("00:25:A0", "Nintendo");
+    m.insert("00:27:09", "Nintendo");
+    m.insert("34:AF:2C", "Nintendo");
+    m.insert("78:A2:A0", "Nintendo");
+    m.insert("7C:BB:8A", "Nintendo");
+    m.insert("98:E8:FA", "Nintendo");
+    m.insert("E0:0C:7F", "Nintendo");
+
+    // Synology
+    m.insert("00:11:32", "Synology");
+    m.insert("00:25:22", "Synology");
+    m.insert("00:50:FC", "Synology");
+    m.insert("90:00:4E", "Synology");
+    m.insert("A0:36:BC", "Synology");
+    m.insert("AC:16:2D", "Synology");
+    m.insert("C0:21:0D", "Synology");
+    m.insert("D4:6E:0E", "Synology");
+    m.insert("E0:4F:43", "Synology");
+    m.insert("F0:76:1C", "Synology");
+
+    // QNAP
+    m.insert("00:08:9B", "QNAP");
+    m.insert("24:5F:DF", "QNAP");
+    m.insert("24:65:11", "QNAP");
+    m.insert("78:24:AF", "QNAP");
+    m.insert("8C:7C:FF", "QNAP");
+    m.insert("A4:7B:2C", "QNAP");
+    m.insert("C0:3F:D5", "QNAP");
+    m.insert("E0:69:95", "QNAP");
+    m.insert("F4:60:0D", "QNAP");
+
+    // Aruba Networks
+    m.insert("00:1A:1E", "Aruba Networks");
+    m.insert("04:BD:88", "Aruba Networks");
+    m.insert("20:4C:03", "Aruba Networks");
+    m.insert("24:DE:C6", "Aruba Networks");
+    m.insert("6C:F3:7F", "Aruba Networks");
+    m.insert("84:D4:7E", "Aruba Networks");
+    m.insert("94:B4:0F", "Aruba Networks");
+    m.insert("9C:1C:12", "Aruba Networks");
+    m.insert("A0:63:91", "Aruba Networks");
+    m.insert("AC:A3:1E", "Aruba Networks");
+    m.insert("B4:5D:50", "Aruba Networks");
+    m.insert("D8:C7:F8", "Aruba Networks");
+    m.insert("E0:07:1B", "Aruba Networks");
+    m.insert("F0:5C:19", "Aruba Networks");
+
+    // Ring (Amazon)
+    m.insert("9C:29:76", "Ring");
+    m.insert("9C:EF:D5", "Ring");
+    m.insert("C0:95:CF", "Ring");
+    m.insert("CC:44:63", "Ring");
+    m.insert("F4:5C:89", "Ring");
+    m.insert("34:58:7C", "Ring");
+    m.insert("78:4F:43", "Ring");
+
+    // Sonos
+    m.insert("00:0E:58", "Sonos");
+    m.insert("34:7E:5C", "Sonos");
+    m.insert("48:D6:D5", "Sonos");
+    m.insert("54:2A:1B", "Sonos");
+    m.insert("78:28:CA", "Sonos");
+    m.insert("94:9F:3E", "Sonos");
+    m.insert("B8:E9:37", "Sonos");
+    m.insert("F0:F6:C1", "Sonos");
+
+    // Philips Hue (Signify)
+    m.insert("00:17:88", "Philips Hue");
+    m.insert("EC:B5:FA", "Philips Hue");
+    m.insert("00:0C:8B", "Philips Hue");
+    m.insert("90:FD:61", "Philips Hue");
+    m.insert("A0:6F:AA", "Philips Hue");
+    m.insert("C4:AD:34", "Philips Hue");
+    m.insert("D4:68:AA", "Philips Hue");
+
+    // IKEA (TRÅDFRI)
+    m.insert("00:0B:57", "IKEA");
+    m.insert("EC:1B:BD", "IKEA");
+    m.insert("F4:B7:B3", "IKEA");
+    m.insert("68:0A:E2", "IKEA");
+    m.insert("7C:50:49", "IKEA");
+    m.insert("A0:CC:2B", "IKEA");
+    m.insert("CC:86:EC", "IKEA");
+    m.insert("D0:14:11", "IKEA");
+
+    // Hikvision
+    m.insert("00:0C:E6", "Hikvision");
+    m.insert("04:84:8A", "Hikvision");
+    m.insert("18:68:6A", "Hikvision");
+    m.insert("34:14:5F", "Hikvision");
+    m.insert("4C:BD:8F", "Hikvision");
+    m.insert("54:C4:15", "Hikvision");
+    m.insert("68:6D:2C", "Hikvision");
+    m.insert("7C:03:D8", "Hikvision");
+    m.insert("80:91:C0", "Hikvision");
+    m.insert("94:73:D5", "Hikvision");
+    m.insert("9C:28:BF", "Hikvision");
+    m.insert("A4:B1:C1", "Hikvision");
+    m.insert("B4:A3:82", "Hikvision");
+    m.insert("C0:56:E3", "Hikvision");
+    m.insert("D4:27:51", "Hikvision");
+    m.insert("E0:DB:55", "Hikvision");
+    m.insert("EC:17:2F", "Hikvision");
+    m.insert("F0:79:59", "Hikvision");
+
+    // Dahua
+    m.insert("00:0E:54", "Dahua");
+    m.insert("00:12:41", "Dahua");
+    m.insert("1C:08:C1", "Dahua");
+    m.insert("24:0D:C2", "Dahua");
+    m.insert("3C:15:EA", "Dahua");
+    m.insert("4C:48:DA", "Dahua");
+    m.insert("5C:33:8E", "Dahua");
+    m.insert("6C:86:86", "Dahua");
+    m.insert("78:CA:39", "Dahua");
+    m.insert("84:30:90", "Dahua");
+    m.insert("90:02:A9", "Dahua");
+    m.insert("9C:14:65", "Dahua");
+    m.insert("A0:6A:00", "Dahua");
+    m.insert("B0:75:0C", "Dahua");
+    m.insert("C4:34:6B", "Dahua");
+    m.insert("D4:68:BA", "Dahua");
+    m.insert("E0:28:6D", "Dahua");
+    m.insert("EC:8A:C7", "Dahua");
+    m.insert("F0:DE:B9", "Dahua");
+    m.insert("F4:57:3E", "Dahua");
+
+    // Additional Realtek entries (non-duplicate)
+    m.insert("00:14:D1", "Realtek");
+    m.insert("00:17:3F", "Realtek");
+    m.insert("00:1B:1A", "Realtek");
+    m.insert("00:1F:1F", "Realtek");
+    m.insert("00:24:A7", "Realtek");
+    m.insert("00:27:19", "Realtek");
+    m.insert("00:40:05", "Realtek");
+    m.insert("00:80:37", "Realtek");
+    m.insert("00:A0:00", "Realtek");
+    m.insert("08:46:BF", "Realtek");
+    m.insert("1C:44:19", "Realtek");
+    m.insert("24:79:2A", "Realtek");
+    m.insert("28:28:5D", "Realtek");
+    m.insert("30:0E:D5", "Realtek");
+    m.insert("3C:33:00", "Realtek");
+    m.insert("40:47:6A", "Realtek");
+    m.insert("48:51:B7", "Realtek");
+
+    // Additional Broadcom entries (non-duplicate)
+    m.insert("00:0A:F7", "Broadcom");
+    m.insert("00:1B:E9", "Broadcom");
+    m.insert("00:1F:33", "Broadcom");
+    m.insert("00:22:41", "Broadcom");
+    m.insert("00:50:DA", "Broadcom");
+    m.insert("00:60:52", "Broadcom");
+    m.insert("00:80:42", "Broadcom");
+    m.insert("00:A0:96", "Broadcom");
+    m.insert("00:C0:26", "Broadcom");
+    m.insert("08:86:3B", "Broadcom");
+    m.insert("10:08:C1", "Broadcom");
+    m.insert("18:01:E3", "Broadcom");
+    m.insert("1C:14:B3", "Broadcom");
+    m.insert("20:76:8F", "Broadcom");
+    m.insert("24:76:56", "Broadcom");
+    m.insert("28:6A:BA", "Broadcom");
+
+    // Additional Qualcomm entries (non-duplicate)
+    m.insert("00:17:95", "Qualcomm");
+    m.insert("00:1B:32", "Qualcomm");
+    m.insert("00:1E:8D", "Qualcomm");
+    m.insert("00:21:27", "Qualcomm");
+    m.insert("0C:60:76", "Qualcomm");
+    m.insert("10:68:3F", "Qualcomm");
+    m.insert("1C:7B:21", "Qualcomm");
+    m.insert("20:6A:8A", "Qualcomm");
+    m.insert("24:DA:9B", "Qualcomm");
+    m.insert("28:39:5E", "Qualcomm");
+    m.insert("2C:54:CF", "Qualcomm");
+    m.insert("30:7C:B2", "Qualcomm");
+
+    // Additional MediaTek entries (non-duplicate)
+    m.insert("04:7D:7B", "MediaTek");
+    m.insert("10:12:50", "MediaTek");
+    m.insert("14:2D:27", "MediaTek");
+    m.insert("18:30:09", "MediaTek");
+    m.insert("1C:99:4C", "MediaTek");
+    m.insert("20:16:D8", "MediaTek");
+    m.insert("24:93:CA", "MediaTek");
+    m.insert("2C:5D:93", "MediaTek");
+    m.insert("30:FC:68", "MediaTek");
+    m.insert("34:81:F4", "MediaTek");
+    m.insert("38:4C:4F", "MediaTek");
+    m.insert("3C:2C:99", "MediaTek");
+    m.insert("40:F3:08", "MediaTek");
+    m.insert("44:6D:6C", "MediaTek");
+
+    // Additional Google entries (non-duplicate)
+    m.insert("00:1A:11", "Google");
+    m.insert("08:9E:08", "Google");
+    m.insert("14:1F:78", "Google");
+    m.insert("18:D6:C7", "Google");
+    m.insert("20:DF:B9", "Google");
+    m.insert("24:E4:3F", "Google");
+    m.insert("40:49:0F", "Google");
+    m.insert("5C:FF:35", "Google");
+    m.insert("64:BC:0C", "Google");
+    m.insert("70:1C:E7", "Google");
+    m.insert("78:AC:C0", "Google");
+    m.insert("8C:AD:48", "Google");
+
+    // Additional Raspberry Pi entries (non-duplicate)
+    m.insert("D8:3A:DD", "Raspberry Pi");
+    m.insert("00:1E:06", "Raspberry Pi");
+    m.insert("28:CD:C1", "Raspberry Pi");
+    m.insert("3C:84:6A", "Raspberry Pi");
+    m.insert("50:3E:AA", "Raspberry Pi");
+    m.insert("60:38:0E", "Raspberry Pi");
+    m.insert("74:DA:38", "Raspberry Pi");
+    m.insert("8C:4B:59", "Raspberry Pi");
+    m.insert("B8:8D:12", "Raspberry Pi");
+    m.insert("CC:6E:A4", "Raspberry Pi");
+    m.insert("E8:4E:06", "Raspberry Pi");
+
     m
 });
 
@@ -963,11 +1326,83 @@ mod tests {
     }
 
     #[test]
+    fn test_lookup_vendor_linksys() {
+        let result = lookup_vendor("00:0C:41:AA:BB:CC");
+        assert_eq!(result, Some("Linksys".to_string()));
+    }
+
+    #[test]
+    fn test_lookup_vendor_dlink() {
+        let result = lookup_vendor("00:05:5D:11:22:33");
+        assert_eq!(result, Some("D-Link".to_string()));
+    }
+
+    #[test]
+    fn test_lookup_vendor_ubiquiti() {
+        let result = lookup_vendor("00:15:6D:AA:BB:CC");
+        assert_eq!(result, Some("Ubiquiti".to_string()));
+    }
+
+    #[test]
+    fn test_lookup_vendor_mikrotik() {
+        let result = lookup_vendor("00:0C:42:11:22:33");
+        assert_eq!(result, Some("MikroTik".to_string()));
+    }
+
+    #[test]
+    fn test_lookup_vendor_microsoft() {
+        let result = lookup_vendor("00:0D:3A:AA:BB:CC");
+        assert_eq!(result, Some("Microsoft".to_string()));
+    }
+
+    #[test]
+    fn test_lookup_vendor_sony() {
+        let result = lookup_vendor("00:01:4A:11:22:33");
+        assert_eq!(result, Some("Sony".to_string()));
+    }
+
+    #[test]
+    fn test_lookup_vendor_nintendo() {
+        let result = lookup_vendor("00:09:BF:AA:BB:CC");
+        assert_eq!(result, Some("Nintendo".to_string()));
+    }
+
+    #[test]
+    fn test_lookup_vendor_synology() {
+        let result = lookup_vendor("00:11:32:11:22:33");
+        assert_eq!(result, Some("Synology".to_string()));
+    }
+
+    #[test]
+    fn test_lookup_vendor_hikvision() {
+        let result = lookup_vendor("04:84:8A:AA:BB:CC");
+        assert_eq!(result, Some("Hikvision".to_string()));
+    }
+
+    #[test]
+    fn test_lookup_vendor_dahua() {
+        let result = lookup_vendor("00:0E:54:11:22:33");
+        assert_eq!(result, Some("Dahua".to_string()));
+    }
+
+    #[test]
+    fn test_lookup_vendor_sonos() {
+        let result = lookup_vendor("00:0E:58:AA:BB:CC");
+        assert_eq!(result, Some("Sonos".to_string()));
+    }
+
+    #[test]
+    fn test_lookup_vendor_aruba() {
+        let result = lookup_vendor("00:1A:1E:11:22:33");
+        assert_eq!(result, Some("Aruba Networks".to_string()));
+    }
+
+    #[test]
     fn test_no_duplicate_keys() {
         // Verify the table has no duplicate keys by checking the count
         // matches the number of unique insertions
         let table = &*OUI_TABLE;
-        // The table should have a reasonable number of entries
-        assert!(table.len() > 100, "OUI table should have >100 entries, got {}", table.len());
+        // The table should have a large number of entries covering 40+ vendors
+        assert!(table.len() > 800, "OUI table should have >800 entries, got {}", table.len());
     }
 }

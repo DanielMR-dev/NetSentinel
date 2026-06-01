@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -96,9 +96,9 @@ export const SettingsView: React.FC = () => {
   const isLoading = useSettingsStore((s) => s.isLoading);
   const error = useSettingsStore((s) => s.error);
   const clearError = useSettingsStore((s) => s.clearError);
+  const lastSaved = useSettingsStore((s) => s.lastSaved);
   const [activeTab, setActiveTab] = useState<TabId>('scan');
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [toastType, setToastType] = useState<'success' | 'error'>('success');
+  const [dismissedToastMessage, setDismissedToastMessage] = useState<string | null>(null);
   const [initialLoadDone, setInitialLoadDone] = useState(false);
 
   // Load initial data - only fetchProfiles, which handles both profiles AND settings
@@ -126,29 +126,31 @@ export const SettingsView: React.FC = () => {
     };
   }, [fetchProfiles]);
 
-  // Show toast on successful save
-  useEffect(() => {
-    const lastSaved = useSettingsStore.getState().lastSaved;
-    if (lastSaved) {
-      setToastMessage('Settings saved successfully');
-      setToastType('success');
-      const timer = setTimeout(() => setToastMessage(null), 3000);
-      return () => clearTimeout(timer);
-    }
-  }, []);
+  // Derive raw toast state from store values (before dismissal filtering)
+  const rawToastMessage = useMemo(() => {
+    if (error) return error;
+    if (lastSaved) return 'Settings saved successfully';
+    return null;
+  }, [error, lastSaved]);
 
-  // Show toast on error
+  const toastType: 'success' | 'error' = error ? 'error' : 'success';
+
+  // Only show toast if it hasn't been dismissed
+  const toastMessage = rawToastMessage !== dismissedToastMessage ? rawToastMessage : null;
+
+  // Auto-dismiss toast after a delay
   useEffect(() => {
-    if (error) {
-      setToastMessage(error);
-      setToastType('error');
-      const timer = setTimeout(() => {
-        setToastMessage(null);
+    if (!toastMessage) return;
+
+    const delay = toastType === 'error' ? 5000 : 3000;
+    const timer = setTimeout(() => {
+      setDismissedToastMessage(toastMessage);
+      if (toastType === 'error') {
         clearError();
-      }, 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [error, clearError]);
+      }
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [toastMessage, toastType, clearError]);
 
   // Derive loading state
   const showLoading = !initialLoadDone || isLoading;
@@ -182,7 +184,10 @@ export const SettingsView: React.FC = () => {
           )}
           <span className="text-sm font-medium">{toastMessage}</span>
           <button
-            onClick={() => setToastMessage(null)}
+            onClick={() => {
+              setDismissedToastMessage(rawToastMessage);
+              if (toastType === 'error') clearError();
+            }}
             className="ml-2 p-1 rounded-lg hover:bg-white/10 transition-colors"
             aria-label="Dismiss notification"
           >

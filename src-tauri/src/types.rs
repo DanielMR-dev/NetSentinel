@@ -10,6 +10,8 @@ pub enum ScanType {
     Connect,
     /// Stealth SYN scan (requires raw socket privileges)
     Syn,
+    /// UDP port scan (no special privileges needed)
+    Udp,
 }
 
 impl Default for ScanType {
@@ -206,6 +208,7 @@ pub struct ScanCompleteEvent {
 /// Map port number to known service name
 pub fn get_service_name(port: u16) -> Option<String> {
     match port {
+        // TCP services
         20 => Some("FTP-DATA".to_string()),
         21 => Some("FTP".to_string()),
         22 => Some("SSH".to_string()),
@@ -226,6 +229,19 @@ pub fn get_service_name(port: u16) -> Option<String> {
         6379 => Some("Redis".to_string()),
         8080 => Some("HTTP-ALT".to_string()),
         8443 => Some("HTTPS-ALT".to_string()),
+        // UDP-specific services
+        67 => Some("DHCP".to_string()),
+        68 => Some("DHCP".to_string()),
+        69 => Some("TFTP".to_string()),
+        123 => Some("NTP".to_string()),
+        161 => Some("SNMP".to_string()),
+        162 => Some("SNMP-TRAP".to_string()),
+        500 => Some("IKE".to_string()),
+        514 => Some("Syslog".to_string()),
+        1900 => Some("SSDP".to_string()),
+        5353 => Some("mDNS".to_string()),
+        5355 => Some("LLMNR".to_string()),
+        4789 => Some("VXLAN".to_string()),
         _ => None,
     }
 }
@@ -242,5 +258,66 @@ mod tests {
         assert_eq!(estimate_os_by_ttl(100), Some("Windows".to_string()));
         assert_eq!(estimate_os_by_ttl(255), Some("Network Device".to_string()));
         assert_eq!(estimate_os_by_ttl(150), Some("Network Device".to_string()));
+    }
+
+    #[test]
+    fn test_scan_type_udp_serialization() {
+        let scan_type = ScanType::Udp;
+        let json = serde_json::to_string(&scan_type).unwrap();
+        assert_eq!(json, "\"udp\"");
+
+        let deserialized: ScanType = serde_json::from_str("\"udp\"").unwrap();
+        assert_eq!(deserialized, ScanType::Udp);
+    }
+
+    #[test]
+    fn test_scan_type_all_variants_serialization() {
+        // Connect
+        let json = serde_json::to_string(&ScanType::Connect).unwrap();
+        assert_eq!(json, "\"connect\"");
+
+        // Syn
+        let json = serde_json::to_string(&ScanType::Syn).unwrap();
+        assert_eq!(json, "\"syn\"");
+
+        // Udp
+        let json = serde_json::to_string(&ScanType::Udp).unwrap();
+        assert_eq!(json, "\"udp\"");
+    }
+
+    #[test]
+    fn test_scan_type_default_is_connect() {
+        assert_eq!(ScanType::default(), ScanType::Connect);
+    }
+
+    #[test]
+    fn test_get_service_name_tcp_services() {
+        assert_eq!(get_service_name(22), Some("SSH".to_string()));
+        assert_eq!(get_service_name(80), Some("HTTP".to_string()));
+        assert_eq!(get_service_name(443), Some("HTTPS".to_string()));
+        assert_eq!(get_service_name(3389), Some("RDP".to_string()));
+    }
+
+    #[test]
+    fn test_get_service_name_udp_services() {
+        assert_eq!(get_service_name(53), Some("DNS".to_string()));
+        assert_eq!(get_service_name(67), Some("DHCP".to_string()));
+        assert_eq!(get_service_name(68), Some("DHCP".to_string()));
+        assert_eq!(get_service_name(69), Some("TFTP".to_string()));
+        assert_eq!(get_service_name(123), Some("NTP".to_string()));
+        assert_eq!(get_service_name(161), Some("SNMP".to_string()));
+        assert_eq!(get_service_name(162), Some("SNMP-TRAP".to_string()));
+        assert_eq!(get_service_name(500), Some("IKE".to_string()));
+        assert_eq!(get_service_name(514), Some("Syslog".to_string()));
+        assert_eq!(get_service_name(1900), Some("SSDP".to_string()));
+        assert_eq!(get_service_name(5353), Some("mDNS".to_string()));
+        assert_eq!(get_service_name(5355), Some("LLMNR".to_string()));
+        assert_eq!(get_service_name(4789), Some("VXLAN".to_string()));
+    }
+
+    #[test]
+    fn test_get_service_name_unknown_port() {
+        assert_eq!(get_service_name(9999), None);
+        assert_eq!(get_service_name(31337), None);
     }
 }

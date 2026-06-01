@@ -4,7 +4,6 @@ import { useDashboardStore } from './stores/dashboardStore';
 import { useCapabilitiesStore, setupPrivilegeStatusListener, cleanupPrivilegeStatusListener } from './stores/capabilitiesStore';
 import { setupScanEventListeners, cleanupScanEventListeners } from './stores/scanStore';
 import { setupBannerEventListeners, cleanupBannerEventListeners } from './stores/bannerStore';
-import { setupBaselineEventListeners, cleanupBaselineEventListeners } from './stores/baselineStore';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { ScanView } from './components/scan/ScanView';
 import { TabNavigation } from './components/dashboard/TabNavigation';
@@ -110,7 +109,6 @@ export function App() {
       try {
         await setupScanEventListeners();
         await setupBannerEventListeners();
-        await setupBaselineEventListeners();
         await setupPrivilegeStatusListener();
       } catch (error) {
         console.error('Failed to set up event listeners:', error);
@@ -122,7 +120,6 @@ export function App() {
     return () => {
       cleanupScanEventListeners();
       cleanupBannerEventListeners();
-      cleanupBaselineEventListeners();
       cleanupPrivilegeStatusListener();
     };
   }, []);

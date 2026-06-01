@@ -14,6 +14,7 @@ import type {
 } from '../types/device';
 import type { ScanConfig } from '../types/settings';
 import { useSettingsStore } from './settingsStore';
+import { useBannerStore } from './bannerStore';
 
 type ScanStatus = 'idle' | 'scanning' | 'paused' | 'completed' | 'cancelled' | 'error';
 
@@ -336,6 +337,14 @@ export async function setupScanEventListeners() {
     };
 
     useScanStore.getState()._addDevice(device);
+
+    // Populate banner store with banner results from the device_found event
+    // (the backend sends banners inside device_found, not via a separate 'banner_found' event)
+    const bannerResults = event.payload.banner_results || [];
+    const bannerStore = useBannerStore.getState();
+    for (const banner of bannerResults) {
+      bannerStore.addBanner(banner);
+    }
   });
 
   // Listen for scan progress events

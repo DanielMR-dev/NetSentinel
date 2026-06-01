@@ -10,6 +10,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use crate::error::ScanError;
+use crate::network::tls::TlsInfo;
 
 /// Result of a banner grab operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +28,8 @@ pub struct BannerResult {
     pub os_fingerprint: Option<String>,
     /// Unix timestamp when the banner was grabbed
     pub timestamp: i64,
+    /// TLS certificate information (only for TLS-capable ports)
+    pub tls_info: Option<TlsInfo>,
 }
 
 /// Well-known ports to attempt banner grabbing on.
@@ -133,6 +136,7 @@ impl BannerGrabber {
             service,
             os_fingerprint,
             timestamp: chrono::Utc::now().timestamp(),
+            tls_info: None,
         })
     }
 
@@ -469,11 +473,60 @@ mod tests {
             service: Some("OpenSSH 8.9p1".to_string()),
             os_fingerprint: Some("Ubuntu".to_string()),
             timestamp: 1700000000,
+            tls_info: None,
         };
 
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"ip\""));
         assert!(json.contains("\"osFingerprint\""));
+    }
+
+    #[test]
+    fn test_banner_result_with_tls_info_none() {
+        let result = BannerResult {
+            ip: "192.168.1.1".to_string(),
+            port: 80,
+            banner: "HTTP/1.1 200 OK".to_string(),
+            service: Some("HTTP".to_string()),
+            os_fingerprint: None,
+            timestamp: 1700000000,
+            tls_info: None,
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"tlsInfo\":null"));
+    }
+
+    #[test]
+    fn test_banner_result_with_tls_info_some() {
+        let tls_info = TlsInfo {
+            version: "TLSv1.3".to_string(),
+            cipher_suite: "TLS_AES_256_GCM_SHA384".to_string(),
+            issuer: "Let's Encrypt Authority X3".to_string(),
+            subject: "example.com".to_string(),
+            not_before: 1_700_000_000,
+            not_after: 1_710_000_000,
+            self_signed: false,
+            san_domains: vec!["example.com".to_string()],
+            expired: false,
+            days_until_expiry: 115,
+        };
+
+        let result = BannerResult {
+            ip: "192.168.1.1".to_string(),
+            port: 443,
+            banner: "HTTP/1.1 200 OK".to_string(),
+            service: Some("HTTPS".to_string()),
+            os_fingerprint: None,
+            timestamp: 1700000000,
+            tls_info: Some(tls_info),
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"tlsInfo\":{"));
+        assert!(json.contains("\"cipherSuite\""));
+        assert!(json.contains("TLS_AES_256_GCM_SHA384"));
+        assert!(json.contains("\"selfSigned\":false"));
     }
 
     #[test]

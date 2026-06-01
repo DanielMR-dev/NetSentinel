@@ -66,6 +66,9 @@ export const useBannerStore = create<BannerStore>((set, get) => ({
 }));
 
 // Event listener setup/cleanup
+// The backend emits 'banner_found' events in real-time during banner grabbing,
+// AND includes banner_results[] inside 'device_found' events (handled in scanStore.ts).
+// The store deduplicates by IP+port, so both sources are safe.
 let unlistenBannerFound: (() => void) | null = null;
 let unlistenCveAlert: (() => void) | null = null;
 

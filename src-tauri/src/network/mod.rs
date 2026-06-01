@@ -10,3 +10,5 @@ pub mod privileges;
 pub mod sanitize;
 pub mod syn_scan;
 pub mod timing;
+pub mod tls;
+pub mod udp_scan;

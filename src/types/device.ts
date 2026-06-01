@@ -10,7 +10,7 @@ export interface Port {
 }
 
 // --- Scan Type ---
-export type ScanType = 'connect' | 'syn';
+export type ScanType = 'connect' | 'syn' | 'udp';
 
 // --- Timing Templates ---
 export type TimingTemplate = 'paranoid' | 'sneaky' | 'polite' | 'normal' | 'aggressive' | 'insane';
@@ -32,6 +32,21 @@ export const TIMING_TEMPLATES: TimingTemplateInfo[] = [
   { id: 'insane', label: 'T5 - Insane', description: 'No delay, 1000 concurrent. Maximum speed.', maxConcurrent: 1000, delayMs: 0 },
 ];
 
+// --- TLS/SSL Analysis ---
+// Rust: #[serde(rename_all = "camelCase")] on TlsInfo
+export interface TlsInfo {
+  version: string;
+  cipherSuite: string;
+  issuer: string;
+  subject: string;
+  notBefore: number;
+  notAfter: number;
+  selfSigned: boolean;
+  sanDomains: string[];
+  expired: boolean;
+  daysUntilExpiry: number;
+}
+
 // --- Banner Grabbing ---
 // Rust: #[serde(rename_all = "camelCase")] on BannerResult
 export interface BannerResult {
@@ -41,6 +56,7 @@ export interface BannerResult {
   service: string | null;
   osFingerprint: string | null;
   timestamp: number;
+  tlsInfo: TlsInfo | null;
 }
 
 // --- CVE Engine ---

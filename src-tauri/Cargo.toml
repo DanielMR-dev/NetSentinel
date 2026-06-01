@@ -43,3 +43,6 @@ tempfile = "3"
 rfd = "0.14"
 regex = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }
+tokio-native-tls = "0.3"
+native-tls = "0.2"
+x509-parser = "0.16"
