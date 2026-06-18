@@ -2,7 +2,7 @@
 name: Frontend Developer
 description: Senior frontend developer for the Network Scanner project. Implements React components, Zustand stores, and Tauri IPC calls following strict TypeScript standards and the Planner's blueprint.
 mode: subagent
-model: opencode-go/qwen3.6-plus
+model: opencode-go/qwen3.7-plus
 temperature: 0.5
 ---
 
