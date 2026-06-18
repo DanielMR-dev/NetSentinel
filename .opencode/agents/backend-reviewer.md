@@ -2,7 +2,7 @@
 name: Backend Reviewer
 description: Expert Rust security and systems code reviewer. Audits code for panics, thread blocking, deadlocks, and unsafe memory usage.
 mode: subagent
-model: opencode-go/kimi-k2.6
+model: opencode-go/kimi-k2.7-code
 temperature: 0.2
 ---
 
