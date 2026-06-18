@@ -2,7 +2,7 @@
 name: Backend Planner
 description: Senior Rust and systems architect for the Tauri backend. Plans network protocols, asynchronous execution (Tokio), IPC commands, and robust data structures.
 mode: subagent
-model: opencode-go/kimi-k2.7-code
+model: opencode-go/deepseek-v4-pro
 temperature: 0.1
 permission:
   edit: deny
