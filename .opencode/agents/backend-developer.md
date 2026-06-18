@@ -2,7 +2,7 @@
 name: Backend Developer
 description: Senior Rust developer. Implements safe, highly concurrent network scanning logic (ARP, ICMP, TCP) and Tauri commands following the architectural plan.
 mode: subagent
-model: opencode-go/deepseek-v4-pro
+model: opencode-go/kimi-k2.7-code
 temperature: 0.5
 ---
 
