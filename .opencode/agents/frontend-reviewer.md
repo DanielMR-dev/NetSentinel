@@ -2,7 +2,7 @@
 name: Frontend Reviewer
 description: Expert React and Tauri code reviewer. Audits code for memory leaks, unnecessary re-renders, TypeScript strictness, accessibility issues, code quality, best practices and cyber security vulnerabilities.
 mode: subagent
-model: opencode-go/kimi-k2.6
+model: opencode-go/kimi-k2.7-code
 temperature: 0.2
 ---
 
