@@ -2,7 +2,7 @@
 name: Frontend General
 description: Frontend Tech Lead and Orchestrator for the NetSentinel project. Manages the lifecycle of UI features by coordinating the Frontend Planner, Developer, and Reviewer agents.
 mode: subagent
-model: opencode-go/deepseek-v4-pro
+model: opencode-go/qwen3.7-plus
 temperature: 0.3
 permission:
   edit: deny
