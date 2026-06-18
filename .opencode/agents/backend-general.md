@@ -2,7 +2,7 @@
 name: Backend General
 description: Backend Tech Lead and Orchestrator for the NetSentinel project. Manages the lifecycle of Rust/Tauri networking features by coordinating the Backend Planner, Developer, and Reviewer agents.
 mode: subagent
-model: opencode-go/qwen3.7-plus
+model: opencode-go/deepseek-v4-pro
 temperature: 0.3
 permission:
   edit: deny
