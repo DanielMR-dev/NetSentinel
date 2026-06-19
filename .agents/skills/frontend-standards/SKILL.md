@@ -1,537 +1,304 @@
 ---
 name: Frontend Standards
-description: Comprehensive coding standards, patterns, and best practices for the NetSentinel frontend. This skill defines the non-negotiable rules for TypeScript strictness, Tauri IPC, React performance, accessibility, and Tailwind CSS styling.
+description: Comprehensive coding standards, patterns, and best practices for the NetSentinel frontend. This skill defines the non-negotiable rules for Rust Iced GUI development, state management, asynchronous layout updates, themes, and Elm architecture.
 version: 1.0.0
 project: NetSentinel
-context: React 19 + TypeScript + Tailwind CSS + Zustand + Tauri
+context: Rust + Iced + Tokio + Elm Architecture
 ---
 
-# NetSentinel Frontend Standards
+# NetSentinel Frontend Standards (Iced)
 
-This skill defines the authoritative rules and patterns that every frontend developer, planner, and reviewer must follow when working on the NetSentinel project.
+This skill defines the authoritative rules and patterns that every frontend developer, planner, and reviewer must follow when working on the Iced-based desktop UI for the NetSentinel project.
 
 ---
 
-## 1. TypeScript Strictness
+## 1. The Elm Architecture (Model-View-Update)
 
-TypeScript strict mode is non-negotiable for all `.ts` and `.tsx` files.
+NetSentinel's frontend uses the **Iced** framework, which implements the Elm Architecture. Every UI component or page must adhere strictly to this pattern.
 
-### 1.1 Forbidden Patterns
-
-| Pattern | Rule | Reason |
-|---------|------|--------|
-| `any` | **NEVER use** | Breaks type safety entirely. Use `unknown` with type narrowing. |
-| `as Type` | **AVOID** | Use only when absolutely safe, with a comment explaining why. |
-| `!` (non-null assertion) | **NEVER use** | Use optional chaining (`?.`) or explicit checks instead. |
-| `// @ts-ignore` | **NEVER use** | Fix the underlying type error properly. |
-
-### 1.2 Type Definitions
-
-All IPC payloads **MUST** have explicit interfaces:
-
-```typescript
-// BAD — generic and unsafe
-const result = await invoke('scan_network', { range: range as any });
-
-// GOOD — strict interface
-interface ScanRequest {
-  cidr: string;
-  timeout_ms: number;
-}
-
-interface ScanResponse {
-  devices: Device[];
-  duration_ms: number;
-}
-
-const result = await invoke<ScanResponse>('scan_network', {
-  cidr: validatedCidr,
-  timeout_ms: SCAN_TIMEOUT,
-});
+```
+       +------------------+
+       |                  |
+       v                  |
+   +--------+          +--------+
+   | Update | -------> | Model  |
+   +--------+          +--------+
+       ^                  |
+       |                  v
+   +--------+          +------++
+   | Message| <------- | View  |
+   +--------+          +-------+
 ```
 
-### 1.3 Generic Constraints
+### 1.1 Model (State)
 
-Use generics to maintain type safety across async operations:
+The application state must be modeled using clean, immutable structs. Avoid nesting too deeply to keep state updates straightforward.
 
-```typescript
-// GOOD — generic with constraint
-async function fetchScanResult<T extends ScanResult>(
-  scanId: string
-): Promise<T> {
-  return invoke<T>('get_scan_result', { scanId });
+```rust
+// GOOD — Clear, descriptive model representation
+pub struct AppState {
+    pub current_page: Page,
+    pub scan_state: ScanUiState,
+    pub theme: CustomTheme,
+    pub is_elevated: bool,
 }
 ```
 
----
+### 1.2 Message (Event Enum)
 
-## 2. Tauri IPC Communication
+Messages represent all user interactions, asynchronous task completions, and external event notifications.
 
-All communication with the Rust backend happens through Tauri's invoke and event system.
+* **Descriptive Naming:** Messages should use prefix patterns denoting their source page or domain (e.g., `Scan(...)`, `Settings(...)`, `Nav(...)`).
+* **Variant Structuring:** Group related actions in nested enums or structures.
 
-### 2.1 Command Invocation Pattern
+```rust
+#[derive(Debug, Clone)]
+pub enum Message {
+    // Page Navigation
+    NavigateTo(Page),
+    
+    // Scan Operations
+    StartScanRequested,
+    ScanProgressReceived(f32),
+    DeviceDiscovered(Device),
+    ScanFinished(Result<Duration, String>),
+    
+    // Theme
+    ToggleTheme,
+}
+```
 
-```typescript
-// Always await with try/catch
-async function startScan(cidr: string): Promise<ScanResponse> {
-  try {
-    return await invoke<ScanResponse>('start_scan', { cidr });
-  } catch (error) {
-    if (isTauriError(error)) {
-      console.error(`Scan failed: ${error.message}`);
-      throw new ScanError(error.message, error.code);
+### 1.3 Update (State Mutation & Commands)
+
+The `update` function handles state changes and returns `Command<Message>` to execute asynchronous side effects.
+
+* **Purity:** Keep the state transitions fast and direct.
+* **Side Effects:** Never execute blocking network requests or database queries directly within `update`. Delegate them using `Command::perform` or `Subscription`.
+
+```rust
+pub fn update(&mut self, message: Message) -> Command<Message> {
+    match message {
+        Message::NavigateTo(page) => {
+            self.current_page = page;
+            Command::none()
+        }
+        Message::StartScanRequested => {
+            self.scan_state.is_scanning = true;
+            self.scan_state.progress = 0.0;
+            self.scan_state.discovered_devices.clear();
+            
+            // Perform asynchronous scan via Command
+            Command::perform(
+                run_network_scan(self.scan_state.cidr.clone()),
+                Message::ScanFinished
+            )
+        }
+        Message::DeviceDiscovered(device) => {
+            self.scan_state.discovered_devices.push(device);
+            Command::none()
+        }
+        _ => Command::none()
     }
-    throw error;
-  }
 }
 ```
 
-### 2.2 Event Listening with Cleanup
+### 1.4 View (UI Rendering)
 
-**CRITICAL:** Every `listen()` call MUST be cleaned up in the `useEffect` return function. Failure to do so causes memory leaks in the WebView.
+The `view` function describes how the state is rendered. It must remain a pure function of the model.
 
-```typescript
-useEffect(() => {
-  let unlisten: (() => void) | undefined;
-
-  const setupListener = async () => {
-    unlisten = await listen<DeviceFoundEvent>('device_found', (event) => {
-      setDevices((prev) => [...prev, event.payload]);
-    });
-  };
-
-  setupListener();
-
-  // Cleanup function — MANDATORY
-  return () => {
-    if (unlisten) {
-      unlisten();
-      unlisten = undefined;
-    }
-  };
-}, []);
-```
-
-### 2.3 Event Types
-
-All event payloads must have explicit TypeScript interfaces:
-
-```typescript
-interface DeviceFoundEvent {
-  ip: string;
-  mac: string;
-  hostname?: string;
-  timestamp: number;
-}
-
-interface ScanProgressEvent {
-  scanned: number;
-  total: number;
-  currentTarget: string;
-}
-
-interface ScanCompleteEvent {
-  scanId: string;
-  deviceCount: number;
-  duration_ms: number;
-}
-```
-
-### 2.4 Multi-Listener Handling
-
-When a component needs multiple event listeners, track them all for cleanup:
-
-```typescript
-useEffect(() => {
-  const listeners: (() => void)[] = [];
-
-  const setup = async () => {
-    const unlisten1 = await listen<DeviceFoundEvent>('device_found', handler1);
-    const unlisten2 = await listen<ScanProgressEvent>('scan_progress', handler2);
-
-    listeners.push(unlisten1, unlisten2);
-  };
-
-  setup();
-
-  return () => {
-    listeners.forEach((unlisten) => unlisten());
-  };
-}, []);
-```
+* **No Side Effects:** Do not trigger operations or mutate state within `view`.
+* **Lightweight:** Avoid expensive calculations inside `view`. Compute sorted lists or statistics ahead of time during `update` or cache them.
 
 ---
 
-## 3. React Component Patterns
+## 2. Asynchronous GUI Execution
 
-### 3.1 Functional Components Only
+Because network scanning is highly concurrent and involves heavy network I/O, the UI must never block. All asynchronous tasks are handled via Iced's `Command` and `Subscription` systems.
 
-Use only functional components with hooks. Class components are not permitted.
+### 2.1 Command Execution
 
-```typescript
-// CORRECT
-export const NetworkGraph: React.FC<NetworkGraphProps> = ({ devices }) => {
-  return (/* component */);
-}
+For one-off asynchronous actions (like writing a configuration profile or querying a single host), use `Command::perform`.
 
-// INCORRECT — class components not allowed
-export class NetworkGraph extends Component { /* ... */ }
-```
-
-### 3.2 Component Structure
-
-Each component file should follow this order:
-
-1. Type definitions (interfaces/types)
-2. Component function
-3. Helper hooks (custom hooks above component if co-located)
-4. Export
-
-```typescript
-// 1. Type definitions
-interface DeviceCardProps {
-  device: Device;
-  isSelected: boolean;
-  onSelect: (id: string) => void;
-}
-
-// 2. Custom hooks (if component-specific)
-const useDeviceSelection = (deviceId: string) => {
-  const selectDevice = useStore((s) => s.selectDevice);
-  return { isSelected: useStore((s) => s.selectedIds.includes(deviceId)), selectDevice };
-};
-
-// 3. Component
-export const DeviceCard: React.FC<DeviceCardProps> = ({ device, isSelected, onSelect }) => {
-  return (
-    <div className={clsx('card', isSelected && 'card-selected')}>
-      {/* JSX */}
-    </div>
-  );
-};
-```
-
-### 3.3 Memoization Guidelines
-
-Use `useMemo`, `useCallback`, and `React.memo` strategically:
-
-| Scenario | Technique |
-|----------|-----------|
-| Expensive calculations (large device lists) | `useMemo` |
-| Callbacks passed as props to memoized children | `useCallback` |
-| Pure presentational components | `React.memo` |
-| Array mapping with stable keys | Always ensure `key` is stable (device MAC preferred over array index) |
-
-```typescript
-// Memoize expensive filtered/sorted lists
-const sortedDevices = useMemo(() => {
-  return [...devices].sort((a, b) => a.ip.localeCompare(b.ip));
-}, [devices]);
-
-// Memoize callbacks for child components
-const handleDeviceSelect = useCallback((id: string) => {
-  onSelect(id);
-}, [onSelect]);
-```
-
-### 3.4 List Rendering
-
-When rendering large lists (network scans can return 200+ devices), ensure:
-
-```typescript
-// Always use stable, unique keys — MAC addresses preferred
-{devices.map((device) => (
-  <DeviceCard key={device.mac} device={device} />
-))}
-
-// For virtualized lists (100+ items), use react-window or similar
-```
-
----
-
-## 4. State Management (Zustand)
-
-### 4.1 Store Structure
-
-Organize Zustand stores by domain feature:
-
-```
-src/
-  stores/
-    scanStore.ts      # Network scanning state
-    deviceStore.ts    # Discovered devices
-    uiStore.ts        # UI state (modals, sidebar)
-```
-
-### 4.2 Store Patterns
-
-```typescript
-interface ScanStore {
-  // State
-  isScanning: boolean;
-  scanProgress: number;
-  devices: Device[];
-
-  // Actions
-  startScan: (cidr: string) => Promise<void>;
-  stopScan: () => void;
-}
-
-export const useScanStore = create<ScanStore>((set, get) => ({
-  // Initial state
-  isScanning: false,
-  scanProgress: 0,
-  devices: [],
-
-  // Actions
-  startScan: async (cidr: string) => {
-    set({ isScanning: true, scanProgress: 0 });
-    try {
-      const result = await invoke<ScanResponse>('start_scan', { cidr });
-      set({ devices: result.devices, scanProgress: 100 });
-    } finally {
-      set({ isScanning: false });
-    }
-  },
-
-  stopScan: () => {
-    invoke('stop_scan').catch(console.error);
-    set({ isScanning: false });
-  },
-}));
-```
-
-### 4.3 Subscription Patterns
-
-Prefer selector functions to avoid unnecessary re-renders:
-
-```typescript
-// BAD — subscribes to entire store, re-renders on any change
-const { devices, isScanning } = useScanStore();
-
-// GOOD — selective subscription via selector
-const devices = useScanStore((s) => s.devices);
-const isScanning = useScanStore((s) => s.isScanning);
-
-// GOOD — multiple selectors
-const [devices, isScanning] = useScanStore((s) => [s.devices, s.isScanning]);
-```
-
----
-
-## 5. Tailwind CSS Guidelines
-
-### 5.1 Class Composition
-
-Use `clsx` and `tailwind-merge` for conditional classes:
-
-```typescript
-import { clsx } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-
-const buttonClass = (isLoading: boolean, variant: 'primary' | 'secondary') =>
-  twMerge(
-    clsx(
-      'px-4 py-2 rounded-lg font-medium transition-colors',
-      'focus:outline-none focus:ring-2 focus:ring-offset-2',
-      variant === 'primary' && 'bg-blue-600 text-white hover:bg-blue-700',
-      variant === 'secondary' && 'bg-gray-200 text-gray-900 hover:bg-gray-300',
-      isLoading && 'opacity-50 cursor-not-allowed'
+```rust
+// GOOD — Spawning a background task with future resolution
+fn save_settings(settings: Settings) -> Command<Message> {
+    Command::perform(
+        async move {
+            backend::save_config(settings).await
+        },
+        |result| Message::SettingsSaved(result.map_err(|e| e.to_string()))
     )
-  );
-```
-
-### 5.2 Design Tokens
-
-Use consistent values from the design system:
-
-| Token | Value | Usage |
-|-------|-------|-------|
-| `--color-primary` | `blue-600` | Primary actions |
-| `--color-success` | `green-600` | Success states, online |
-| `--color-warning` | `amber-500` | Warnings |
-| `--color-danger` | `red-600` | Errors, critical |
-| `--color-bg` | `gray-900` | Main background |
-| `--color-surface` | `gray-800` | Cards, panels |
-
-### 5.3 Prohibited Patterns
-
-```typescript
-// BAD — inline styles
-<div style={{ backgroundColor: '#1f2937' }}>
-
-// BAD — arbitrary string concatenation
-<div className={'flex ' + (isActive ? 'bg-blue-600' : 'bg-gray-700')}>
-
-// GOOD — tailwind-merge with clsx
-<div className={twMerge(clsx('flex', isActive && 'bg-blue-600', 'bg-gray-700'))}>
-```
-
----
-
-## 6. Accessibility
-
-### 6.1 Semantic HTML
-
-Use semantic elements for their intended purpose:
-
-```typescript
-// BAD
-<div onClick={handleStart}>Start Scan</div>
-
-// GOOD
-<button onClick={handleStart}>Start Scan</button>
-```
-
-### 6.2 Interactive Elements
-
-All interactive elements must be keyboard accessible:
-
-```typescript
-// For custom interactive components
-<button
-  onClick={handleAction}
-  onKeyDown={(e) => e.key === 'Enter' && handleAction()}
-  role="button"
-  tabIndex={0}
->
-  Action
-</button>
-```
-
-### 6.3 ARIA Attributes
-
-Provide accessible labels for icon-only buttons and visual indicators:
-
-```typescript
-// Icon button without visible text
-<button aria-label="Close panel" onClick={onClose}>
-  <XIcon className="w-5 h-5" />
-</button>
-
-// Status indicators
-<div
-  role="status"
-  aria-label={`Device ${device.hostname} is ${device.status}`}
->
-  <span className="sr-only">Status:</span>
-  {device.status}
-</div>
-
-// Live regions for dynamic updates
-<div aria-live="polite" aria-atomic="true">
-  {scanProgress}% complete
-</div>
-```
-
-### 6.4 Focus Management
-
-Manage focus for modal dialogs and panels:
-
-```typescript
-useEffect(() => {
-  if (isOpen && closeButtonRef.current) {
-    closeButtonRef.current.focus();
-  }
-}, [isOpen]);
-```
-
----
-
-## 7. Error Handling
-
-### 7.1 IPC Error Handling
-
-Always handle Tauri errors gracefully:
-
-```typescript
-interface TauriError {
-  message: string;
-  code?: string;
 }
+```
 
-const isTauriError = (error: unknown): error is TauriError => {
-  return typeof error === 'object' && error !== null && 'message' in error;
-};
+### 2.2 Subscription (Streaming Progress)
 
-async function safeInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  try {
-    return await invoke<T>(command, args);
-  } catch (error) {
-    if (isTauriError(error)) {
-      throw new NetworkError(error.message, error.code);
+For long-running tasks that stream multiple updates over time (like a full subnet scan emitting devices as they are found), use `iced::subscription`.
+
+```rust
+use iced::subscription::{self, Subscription};
+
+pub fn subscription(&self) -> Subscription<Message> {
+    if self.scan_state.is_scanning {
+        // Subscribe to a tokio-based receiver channel mapping incoming events to messages
+        subscription::channel(
+            std::any::TypeId::of::<ScanUiState>(),
+            100,
+            |mut output| async move {
+                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                
+                // Spawn backend scan engine, passing the sender
+                tokio::spawn(async move {
+                    backend::scanner::run_subnet_scan("192.168.1.0/24", tx).await;
+                });
+                
+                // Stream updates to the GUI event loop
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        backend::ScanEvent::DeviceFound(device) => {
+                            let _ = output.send(Message::DeviceDiscovered(device)).await;
+                        }
+                        backend::ScanEvent::Progress(p) => {
+                            let _ = output.send(Message::ScanProgressReceived(p)).await;
+                        }
+                        backend::ScanEvent::Finished(res) => {
+                            let _ = output.send(Message::ScanFinished(res)).await;
+                            break;
+                        }
+                    }
+                }
+            }
+        )
+    } else {
+        Subscription::none()
     }
-    throw new NetworkError('Unknown error', 'UNKNOWN');
-  }
 }
 ```
 
-### 7.2 Error State UI
+---
 
-Display errors with clear, user-friendly messages:
+## 3. Layout and Widget Guidelines
 
-```typescript
-const ErrorDisplay: React.FC<{ error: Error; onRetry?: () => void }> = ({
-  error,
-  onRetry,
-}) => (
-  <div role="alert" className="p-4 bg-red-900/50 border border-red-700 rounded-lg">
-    <p className="text-red-300">{error.message}</p>
-    {onRetry && (
-      <button onClick={onRetry} className="mt-2 text-sm text-red-400 hover:text-red-300">
-        Retry
-      </button>
-    )}
-  </div>
-);
+Iced uses a responsive, flexible layout system based on flexbox concepts.
+
+### 3.1 Layout Composition
+
+Construct interfaces using layout structures instead of arbitrary coordinates:
+
+* `Column`: Vertically stacked items.
+* `Row`: Horizontally stacked items.
+* `Container`: Wrap a single element, providing padding, alignment, background, and borders.
+* `Scrollable`: Wrap tall content (like host results tables) to prevent layout overflows.
+* `Space`: Create flexible or fixed empty spaces to align elements.
+
+```rust
+use iced::widget::{button, column, container, row, text, Scrollable};
+
+pub fn view(&self) -> Element<Message> {
+    let controls = row![
+        text("Target CIDR:"),
+        text(&self.scan_state.cidr),
+        button("Scan").on_press(Message::StartScanRequested)
+    ]
+    .spacing(10)
+    .align_items(Alignment::Center);
+
+    let mut device_list = column![].spacing(5);
+    for device in &self.scan_state.discovered_devices {
+        device_list = device_list.push(row![
+            text(&device.ip),
+            text(&device.mac),
+            text(device.hostname.as_deref().unwrap_or("Unknown"))
+        ].spacing(20));
+    }
+
+    column![
+        controls,
+        Scrollable::new(device_list)
+    ]
+    .spacing(20)
+    .padding(15)
+    .into()
+}
+```
+
+### 3.2 Responsive & Adaptive Rules
+
+* Always set Scrollable boundaries on dynamic tables.
+* Use `.width(Length::Fill)` and `.height(Length::Fill)` to allow containers to automatically stretch to the window boundaries.
+* Avoid absolute width pixel sizes where possible; prefer percentages or grid columns.
+
+---
+
+## 4. Themes & Custom Styling
+
+NetSentinel features a premium, state-of-the-art dark theme. All styling must rely on the custom color design tokens.
+
+### 4.1 Custom Styling Tokens (RGB / HSL equivalents)
+
+Implement standard styling using custom widgets stylesheets:
+
+* **Primary Color:** High-contrast blue/cyan for primary actions.
+* **Success Color:** Harmonious green for online/active hosts.
+* **Danger Color:** Muted crimson for vulnerabilities/CVE findings.
+* **Background:** Ultra dark charcoal/navy for the main window background.
+* **Surface Background:** Elevated grey for cards and navigation panels.
+
+### 4.2 Stylesheet Definitions
+
+Avoid inline manual style parameters where possible. Define modular style structs implementing Iced widget style traits (e.g. `container::StyleSheet`, `button::StyleSheet`).
+
+```rust
+pub struct ScanCardStyle;
+
+impl container::StyleSheet for ScanCardStyle {
+    type Style = Theme;
+
+    fn appearance(&self, _style: &Self::Style) -> container::Appearance {
+        container::Appearance {
+            background: Some(Background::Color(Color::from_rgb8(31, 41, 55))), // gray-800
+            border: Border {
+                radius: 8.0.into(),
+                width: 1.0,
+                color: Color::from_rgb8(55, 65, 81), // gray-700
+            },
+            ..Default::appearance()
+        }
+    }
+}
 ```
 
 ---
 
-## 8. Performance Checklist
+## 5. Performance Checklist
 
-Before finalizing any component, verify:
+To keep the application GUI running at high FPS (accelerated by the GPU):
 
-- [ ] No `useEffect` with missing cleanup returning Tauri listener unlisten function
-- [ ] Large device lists (100+) use `useMemo` for sorting/filtering
-- [ ] Callbacks passed to child components are wrapped in `useCallback`
-- [ ] No `any` types exist anywhere in the component or its imports
-- [ ] All `invoke` calls have try/catch error handling
-- [ ] All interactive elements have proper keyboard support and ARIA labels
-- [ ] Class strings use `clsx`/`twMerge`, not string concatenation
-- [ ] Stable keys used in list rendering (prefer device MAC over array index)
+* [ ] **No Blocking in update():** Verify that no synchronous network connections, DNS resolution, or filesystem/DB actions exist inside the UI state updates.
+* [ ] **Pure view() Methods:** Make sure the `view()` function contains no nested data cloning or parsing; compute these values when the state changes in `update()`.
+* [ ] **Clean Subscriptions:** Ensure that any asynchronous channel-based `Subscription` gracefully terminates and cleans up resources when the scan task stops or completes.
+* [ ] **Pre-allocated Layouts:** Avoid creating huge lists in dynamic view trees without wrapping them in a `Scrollable` container.
 
 ---
 
-## 9. File Naming Conventions
-
-| File Type | Convention | Example |
-|-----------|------------|---------|
-| Components | PascalCase | `NetworkGraph.tsx` |
-| Hooks | camelCase with `use` prefix | `useDeviceSelection.ts` |
-| Stores | camelCase with `Store` suffix | `scanStore.ts` |
-| Utilities | camelCase | `ipValidator.ts` |
-| Types | PascalCase in `types/` | `types/device.ts` |
-| Constants | SCREAMING_SNAKE_CASE | `SCAN_TIMEOUT_MS` |
-
----
-
-## 10. Directory Structure
+## 6. Directory Structure (Frontend Layout)
 
 ```
 src/
-  components/
-    common/          # Shared UI components (Button, Card, Input)
-    network/         # Network-specific components (NetworkGraph, DeviceCard)
-    scan/            # Scan-related components (ScanControls, ScanProgress)
-  hooks/             # Custom React hooks
-  stores/            # Zustand stores
-  types/             # Shared TypeScript interfaces
-  utils/             # Utility functions
-  App.tsx
-  main.tsx
+  ui/
+    mod.rs             # UI module declarations & Application runner
+    theme.rs           # Theme definition & widget stylesheets
+    views/
+      mod.rs
+      dashboard.rs     # Dashboard layout
+      scan.rs          # Scan targets and results panel
+      history.rs       # Scanning history & details
+      topology.rs      # Interactive graph visualization
+      settings.rs      # Global options and permissions
+    widgets/
+      mod.rs             # Shared reusable UI elements
 ```
 
 ---
 
-*This skill document is aligned with the NetSentinel project architecture (React 19 + TypeScript + Tailwind CSS + Zustand + Tauri) and is mandatory for all frontend development tasks.*
+*This skill document is aligned with the NetSentinel project architecture (Rust + Iced + Tokio) and is mandatory for all frontend/UI development tasks.*
