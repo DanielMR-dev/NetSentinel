@@ -16,8 +16,7 @@ use crate::error::ScanError;
 /// Allows alphanumeric characters, underscores, hyphens, and spaces.
 /// Length: 1-100 characters.
 static NAME_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^[a-zA-Z0-9_\-\s]{1,100}$")
-        .unwrap_or_else(|_| Regex::new(r"^.{1,100}$").unwrap())
+    Regex::new(r"^[a-zA-Z0-9_\-\s]{1,100}$").unwrap_or_else(|_| Regex::new(r"^.{1,100}$").unwrap())
 });
 
 /// Regex for validating UUID format strings.
@@ -129,9 +128,7 @@ pub fn validate_name(input: &str) -> Result<String, ScanError> {
     let trimmed = input.trim();
 
     if trimmed.is_empty() {
-        return Err(ScanError::InvalidInput(
-            "Name cannot be empty".to_string(),
-        ));
+        return Err(ScanError::InvalidInput("Name cannot be empty".to_string()));
     }
 
     if !NAME_REGEX.is_match(trimmed) {
@@ -153,9 +150,7 @@ pub fn validate_id(input: &str) -> Result<String, ScanError> {
     let trimmed = input.trim();
 
     if trimmed.is_empty() {
-        return Err(ScanError::InvalidInput(
-            "ID cannot be empty".to_string(),
-        ));
+        return Err(ScanError::InvalidInput("ID cannot be empty".to_string()));
     }
 
     // Allow the special "default" identifier
