@@ -25,3 +25,6 @@ dist-ssr
 
 # Temporary screenshots directory
 .screenshots-tmp/
+
+# Rust build artifacts
+target/
