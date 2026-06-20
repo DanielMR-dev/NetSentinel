@@ -1,9 +1,8 @@
 //! Settings view — profile manager, scan config editor, UI preferences.
 
 use iced::{Alignment, Length};
-use iced::widget::{button, checkbox, column, container, pick_list, row, scrollable, text, text_input};
+use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input};
 
-use crate::settings::SettingsProfile;
 use crate::ui::theme::{self, TEXT, TEXT_MUTED};
 use crate::ui::widgets;
 use crate::ui::{Message, NetSentinelApp};
@@ -30,28 +29,28 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
                 profile.name.clone()
             };
 
-            let profile_row = row![
+            let mut profile_row = row![
                 text(label)
                     .color(if is_active { TEXT } else { TEXT_MUTED })
                     .size(13)
                     .width(Length::Fill),
                 button(text("Load").color(TEXT).size(11))
                     .padding([4, 10])
-                    .style(theme::SecondaryButton)
+                    .style(theme::secondary_button)
                     .on_press(Message::ProfileSelected(profile.id.clone())),
-                if profile.id != "default" {
-                    button(text("Delete").color(TEXT).size(11))
-                        .padding([4, 10])
-                        .style(theme::DangerButton)
-                        .on_press(Message::ProfileDeleted(profile.id.clone()))
-                        .into()
-                } else {
-                    text("").into()
-                },
             ]
             .spacing(8)
             .padding([4, 8])
-            .align_items(Alignment::Center);
+            .align_y(Alignment::Center);
+
+            if profile.id != "default" {
+                profile_row = profile_row.push(
+                    button(text("Delete").color(TEXT).size(11))
+                        .padding([4, 10])
+                        .style(theme::danger_button)
+                        .on_press(Message::ProfileDeleted(profile.id.clone())),
+                );
+            }
 
             profile_list = profile_list.push(profile_row);
         }
@@ -59,7 +58,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
 
     let create_btn = button(text("New Profile").color(TEXT).size(13))
         .padding([6, 14])
-        .style(theme::PrimaryButton)
+        .style(theme::primary_button)
         .on_press(Message::ProfileCreated);
 
     let profile_card = widgets::card(
@@ -118,7 +117,6 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         profile.scan_config.scan_ports_enabled,
     )
     .on_toggle(Message::SettingsScanPortsToggled)
-    .text_color(TEXT)
     .size(14);
 
     let scan_config_card = widgets::card(
@@ -177,7 +175,6 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         profile.ui_preferences.auto_refresh,
     )
     .on_toggle(Message::SettingsAutoRefreshToggled)
-    .text_color(TEXT)
     .size(14);
 
     let confirm_check = checkbox(
@@ -185,7 +182,6 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         profile.ui_preferences.confirm_before_scan,
     )
     .on_toggle(Message::SettingsConfirmScanToggled)
-    .text_color(TEXT)
     .size(14);
 
     let advanced_check = checkbox(
@@ -193,7 +189,6 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         profile.ui_preferences.show_advanced_options,
     )
     .on_toggle(Message::SettingsAdvancedToggled)
-    .text_color(TEXT)
     .size(14);
 
     let refresh_input = text_input(
@@ -229,14 +224,14 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     // ── Save Button ─────────────────────────────────────────────────────
     let save_btn = button(text("Save Settings").color(TEXT).size(14))
         .padding([8, 20])
-        .style(theme::SuccessButton)
-        .on_press(Message::SettingsSaved);
+        .style(theme::success_button)
+        .on_press(Message::SaveSettings);
 
     content = content.push(save_btn);
 
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(theme::AppBackground)
+            .style(theme::app_background)
         .into()
 }

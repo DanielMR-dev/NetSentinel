@@ -3,8 +3,7 @@
 
 use iced::{Alignment, Length};
 use iced::widget::{
-    button, checkbox, column, container, horizontal_space, pick_list, progress_bar, row,
-    scrollable, text, text_input,
+    button, column, container, pick_list, progress_bar, row, scrollable, text, text_input,
 };
 
 use crate::types::ScanType;
@@ -56,32 +55,32 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         .width(Length::FillPortion(1)),
     ]
     .spacing(12)
-    .align_items(Alignment::End);
+    .align_y(Alignment::End);
 
     // ── Control Buttons ─────────────────────────────────────────────────
     let start_btn = button(text("Start Scan").color(TEXT).size(14))
         .padding([8, 20])
-        .style(theme::PrimaryButton)
+        .style(theme::primary_button)
         .on_press(Message::StartScan);
 
     let stop_btn = button(text("Stop").color(TEXT).size(14))
         .padding([8, 16])
-        .style(theme::DangerButton)
+        .style(theme::danger_button)
         .on_press(Message::StopScan);
 
     let pause_btn = if app.is_paused {
         button(text("Resume").color(TEXT).size(14))
             .padding([8, 16])
-            .style(theme::SuccessButton)
+            .style(theme::success_button)
             .on_press(Message::ResumeScan)
     } else {
         button(text("Pause").color(TEXT).size(14))
             .padding([8, 16])
-            .style(theme::SecondaryButton)
+            .style(theme::secondary_button)
             .on_press(Message::PauseScan)
     };
 
-    let mut controls = row![].spacing(8).align_items(Alignment::Center);
+    let mut controls = row![].spacing(8).align_y(Alignment::Center);
 
     if app.is_scanning {
         controls = controls.push(pause_btn).push(stop_btn);
@@ -180,7 +179,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
             ]
             .spacing(4)
             .padding([3, 8])
-            .align_items(Alignment::Center)
+            .align_y(Alignment::Center)
             .width(Length::Fill);
 
             results_list = results_list.push(device_row);
@@ -292,6 +291,6 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(theme::AppBackground)
+            .style(theme::app_background)
         .into()
 }

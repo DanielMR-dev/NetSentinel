@@ -14,7 +14,8 @@ use std::sync::Arc;
 
 use iced::{Element, Length, Subscription, Task};
 use iced::widget::{column, container, row, text};
-use tokio::sync::{mpsc, Mutex};
+use futures::SinkExt;
+use tokio::sync::mpsc;
 
 use crate::baseline::{Baseline, BaselineDiff};
 use crate::commands::{DeviceInfo, NetworkInfo};
@@ -26,8 +27,7 @@ use crate::commands::platform::PlatformCapabilities;
 use crate::settings::SettingsProfile;
 use crate::state::SharedScanState;
 use crate::types::{Device, ScanType};
-
-use crate::ui::theme::{self, TEXT, TEXT_MUTED};
+use crate::ui::theme::{TEXT, TEXT_MUTED};
 
 pub mod theme;
 pub mod views;
@@ -88,7 +88,7 @@ pub enum Message {
     ResumeScan,
     ScanCidrChanged(String),
     ScanPortsChanged(String),
-    ScanTypeSelected(String),
+    ScanTypeSelected(ScanType),
 
     // Scan events (from subscription)
     DeviceDiscovered(Device),
@@ -106,6 +106,7 @@ pub enum Message {
     SettingsProfilesLoaded(Result<Vec<SettingsProfile>, String>),
     SettingsLoaded(Result<SettingsProfile, String>),
     SettingsSaved(Result<(), String>),
+    SaveSettings,
     ProfileSelected(String),
     ProfileCreated,
     ProfileDeleted(String),
@@ -123,14 +124,19 @@ pub enum Message {
     // History
     HistoryLoaded(Result<Vec<ScanHistoryEntry>, String>),
     HistoryEntryDeleted(Result<String, String>),
+    DeleteHistoryEntry(String),
     HistoryCleared(Result<(), String>),
+    ClearHistory,
     HistoryEntryToggled(String),
 
     // Baseline
     BaselinesLoaded(Result<Vec<Baseline>, String>),
     BaselineSaveResult(Result<String, String>),
+    SaveBaseline,
     BaselineDeleted(Result<String, String>),
+    DeleteBaseline(String),
     BaselineCompared(Result<BaselineDiff, String>),
+    CompareBaseline(String),
     BaselineNameChanged(String),
     BaselineDescriptionChanged(String),
 
@@ -164,7 +170,7 @@ pub struct NetSentinelApp {
 
     // Backend integration
     scan_state: Arc<SharedScanState>,
-    event_rx: Arc<Mutex<Option<mpsc::UnboundedReceiver<AppEvent>>>>,
+    event_rx: Arc<std::sync::Mutex<Option<mpsc::UnboundedReceiver<AppEvent>>>>,
     event_tx: Option<mpsc::UnboundedSender<AppEvent>>,
 
     // System info
@@ -213,16 +219,13 @@ impl NetSentinelApp {
     /// Create a new application instance with initial state
     fn new() -> (Self, Task<Message>) {
         let scan_state = Arc::new(SharedScanState::new());
-        let (event_rx_arc, event_tx_opt) = {
-            let rx_arc = Arc::new(Mutex::new(None));
-            (rx_arc, None)
-        };
+        let event_rx_arc = Arc::new(std::sync::Mutex::new(None));
 
         let app = Self {
             current_page: Page::Dashboard,
             scan_state,
             event_rx: event_rx_arc,
-            event_tx: event_tx_opt,
+            event_tx: None,
             device_info: None,
             network_info: None,
             privilege_status: None,
@@ -306,6 +309,11 @@ impl NetSentinelApp {
 
             // ── Scan Control ────────────────────────────────────────────
             Message::StartScan => {
+                // Guard against re-starting while already scanning
+                if self.is_scanning {
+                    return Task::none();
+                }
+
                 self.is_scanning = true;
                 self.is_paused = false;
                 self.scan_progress = 0.0;
@@ -319,14 +327,10 @@ impl NetSentinelApp {
                 let (tx, rx) = mpsc::unbounded_channel();
                 self.event_tx = Some(tx.clone());
 
-                // Store receiver for subscription
-                let rx_arc = self.event_rx.clone();
-                let rx_task = Task::perform(
-                    async move {
-                        *rx_arc.lock().await = Some(rx);
-                    },
-                    |_| Message::Tick,
-                );
+                // Install receiver synchronously to avoid race with subscription
+                if let Ok(mut guard) = self.event_rx.lock() {
+                    *guard = Some(rx);
+                }
 
                 // Parse ports
                 let ports = parse_ports(&self.scan_ports_str);
@@ -337,7 +341,7 @@ impl NetSentinelApp {
                 let max_hosts = self.settings_profile.scan_config.max_concurrent_hosts as u32;
                 let retry = self.settings_profile.scan_config.retry_count as u8;
 
-                let start_task = Task::perform(
+                Task::perform(
                     async move {
                         crate::commands::start_scan(
                             state,
@@ -357,9 +361,7 @@ impl NetSentinelApp {
                         .map_err(|e| e.to_string())
                     },
                     Message::ScanStartResult,
-                );
-
-                Task::batch(vec![rx_task, start_task])
+                )
             }
 
             Message::StopScan => {
@@ -396,12 +398,8 @@ impl NetSentinelApp {
                 Task::none()
             }
 
-            Message::ScanTypeSelected(type_str) => {
-                self.scan_type = match type_str.as_str() {
-                    "SYN" => ScanType::Syn,
-                    "UDP" => ScanType::Udp,
-                    _ => ScanType::Connect,
-                };
+            Message::ScanTypeSelected(scan_type) => {
+                self.scan_type = scan_type;
                 Task::none()
             }
 
@@ -421,18 +419,15 @@ impl NetSentinelApp {
                 Task::none()
             }
 
-            Message::ScanCompleted { scan_id: _, device_count: _, duration_ms: _, .. } => {
+            Message::ScanCompleted { scan_id: _, device_count: _, duration_ms: _ } => {
                 self.is_scanning = false;
                 self.is_paused = false;
                 self.scan_progress = 1.0;
-                // Clear the receiver
-                let rx_arc = self.event_rx.clone();
-                Task::perform(
-                    async move {
-                        *rx_arc.lock().await = None;
-                    },
-                    |_| Message::Tick,
-                )
+                // Clear the receiver synchronously
+                if let Ok(mut guard) = self.event_rx.lock() {
+                    *guard = None;
+                }
+                Task::none()
             }
 
             Message::ScanLogReceived { level, message, target, timestamp } => {
@@ -508,6 +503,18 @@ impl NetSentinelApp {
                     Err(e) => self.status_message = Some(format!("Failed to save settings: {}", e)),
                 }
                 Task::none()
+            }
+
+            Message::SaveSettings => {
+                let profile = self.settings_profile.clone();
+                Task::perform(
+                    async move {
+                        crate::commands::save_profile(profile)
+                            .await
+                            .map_err(|e| e.to_string())
+                    },
+                    Message::SettingsSaved,
+                )
             }
 
             Message::ProfileSelected(id) => {
@@ -625,12 +632,36 @@ impl NetSentinelApp {
                 Task::none()
             }
 
+            Message::DeleteHistoryEntry(id) => {
+                let id_clone = id.clone();
+                Task::perform(
+                    async move {
+                        crate::commands::delete_scan_history_entry(id)
+                            .await
+                            .map(|_| id_clone)
+                            .map_err(|e| e.to_string())
+                    },
+                    Message::HistoryEntryDeleted,
+                )
+            }
+
             Message::HistoryCleared(result) => {
                 match result {
                     Ok(()) => self.history_entries.clear(),
                     Err(e) => self.status_message = Some(format!("Failed to clear history: {}", e)),
                 }
                 Task::none()
+            }
+
+            Message::ClearHistory => {
+                Task::perform(
+                    async {
+                        crate::commands::clear_scan_history()
+                            .await
+                            .map_err(|e| e.to_string())
+                    },
+                    Message::HistoryCleared,
+                )
             }
 
             Message::HistoryEntryToggled(id) => {
@@ -671,6 +702,29 @@ impl NetSentinelApp {
                 )
             }
 
+            Message::SaveBaseline => {
+                let baseline = crate::baseline::Baseline {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    name: self.baseline_name.clone(),
+                    description: if self.baseline_description.is_empty() {
+                        None
+                    } else {
+                        Some(self.baseline_description.clone())
+                    },
+                    devices: self.discovered_devices.clone(),
+                    scan_cidr: self.scan_cidr.clone(),
+                    created_at: chrono::Utc::now().timestamp(),
+                };
+                Task::perform(
+                    async move {
+                        crate::commands::save_baseline(baseline)
+                            .await
+                            .map_err(|e| e.to_string())
+                    },
+                    Message::BaselineSaveResult,
+                )
+            }
+
             Message::BaselineDeleted(result) => {
                 match result {
                     Ok(id) => {
@@ -681,12 +735,37 @@ impl NetSentinelApp {
                 Task::none()
             }
 
+            Message::DeleteBaseline(id) => {
+                let id_clone = id.clone();
+                Task::perform(
+                    async move {
+                        crate::commands::delete_baseline(id)
+                            .await
+                            .map(|_| id_clone)
+                            .map_err(|e| e.to_string())
+                    },
+                    Message::BaselineDeleted,
+                )
+            }
+
             Message::BaselineCompared(result) => {
                 match result {
                     Ok(diff) => self.baseline_diff = Some(diff),
                     Err(e) => self.status_message = Some(format!("Failed to compare baseline: {}", e)),
                 }
                 Task::none()
+            }
+
+            Message::CompareBaseline(id) => {
+                let state = self.scan_state.clone();
+                Task::perform(
+                    async move {
+                        crate::commands::compare_baseline(id, state)
+                            .await
+                            .map_err(|e| e.to_string())
+                    },
+                    Message::BaselineCompared,
+                )
             }
 
             Message::BaselineNameChanged(name) => {
@@ -771,13 +850,13 @@ impl NetSentinelApp {
         container(layout)
             .width(Length::Fill)
             .height(Length::Fill)
-            .style(theme::AppBackground)
+            .style(theme::app_background)
             .into()
     }
 
     /// Render the navigation bar
     fn view_nav(&self) -> Element<'_, Message> {
-        let mut nav_row = row![].spacing(4).align_items(iced::Alignment::Center);
+        let mut nav_row = row![].spacing(4).align_y(iced::Alignment::Center);
 
         for page in Page::all() {
             let is_active = self.current_page == *page;
@@ -788,9 +867,9 @@ impl NetSentinelApp {
             )
             .padding([8, 16])
             .style(if is_active {
-                theme::PrimaryButton
+                theme::primary_button
             } else {
-                theme::SecondaryButton
+                theme::secondary_button
             })
             .on_press(Message::NavigateTo(page.clone()));
 
@@ -804,16 +883,16 @@ impl NetSentinelApp {
 
         let header = row![
             title,
-            iced::widget::horizontal_space(Length::Fill),
+            iced::widget::horizontal_space().width(Length::Fill),
             nav_row,
         ]
         .padding([12, 20])
-        .align_items(iced::Alignment::Center)
+        .align_y(iced::Alignment::Center)
         .width(Length::Fill);
 
         container(header)
             .width(Length::Fill)
-            .style(theme::HeaderStyle)
+            .style(theme::header_style)
             .into()
     }
 
@@ -836,26 +915,26 @@ impl NetSentinelApp {
                 .size(12)
         };
 
-        let status_row = row![
+        let mut status_row = row![
             status_text,
-            iced::widget::horizontal_space(Length::Fill),
-            if self.status_message.is_some() {
-                iced::widget::button(text("Dismiss").color(TEXT_MUTED).size(11))
-                    .padding([2, 8])
-                    .style(theme::SecondaryButton)
-                    .on_press(Message::StatusDismissed)
-                    .into()
-            } else {
-                text("").into()
-            },
+            iced::widget::horizontal_space().width(Length::Fill),
         ]
         .padding([8, 20])
-        .align_items(iced::Alignment::Center)
+        .align_y(iced::Alignment::Center)
         .width(Length::Fill);
+
+        if self.status_message.is_some() {
+            status_row = status_row.push(
+                iced::widget::button(text("Dismiss").color(TEXT_MUTED).size(11))
+                    .padding([2, 8])
+                    .style(theme::secondary_button)
+                    .on_press(Message::StatusDismissed),
+            );
+        }
 
         container(status_row)
             .width(Length::Fill)
-            .style(theme::HeaderStyle)
+            .style(theme::header_style)
             .into()
     }
 
@@ -864,13 +943,14 @@ impl NetSentinelApp {
         if self.is_scanning {
             let rx = self.event_rx.clone();
 
-            iced::subscription::channel(
+            Subscription::run_with_id(
                 "scan-events",
-                100,
-                move |mut output| async move {
-                    // Take the receiver from the shared Arc
-                    let mut guard = rx.lock().await;
-                    let mut receiver = guard.take();
+                iced::stream::channel(100, move |mut output| async move {
+                    // Take the receiver from the shared Arc (std::sync::Mutex — synchronous lock)
+                    let mut receiver = {
+                        let mut guard = rx.lock().unwrap_or_else(|e| e.into_inner());
+                        guard.take()
+                    };
 
                     if let Some(ref mut rx) = receiver {
                         while let Some(event) = rx.recv().await {
@@ -921,7 +1001,7 @@ impl NetSentinelApp {
 
                     // Keep subscription alive even if receiver is gone
                     std::future::pending::<()>().await;
-                },
+                }),
             )
         } else {
             Subscription::none()

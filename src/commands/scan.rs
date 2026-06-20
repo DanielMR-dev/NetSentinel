@@ -302,6 +302,7 @@ pub async fn get_scan_results(
     })
 }
 
+#[allow(dead_code)]
 /// Attempt ICMP ping sweep discovery.
 ///
 /// Checks privileges first, then runs an ICMP sweep. Returns the list of

@@ -24,8 +24,8 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
 
     let save_btn = button(text("Save Baseline").color(TEXT).size(13))
         .padding([6, 14])
-        .style(theme::PrimaryButton)
-        .on_press(Message::BaselineSaved);
+        .style(theme::primary_button)
+        .on_press(Message::SaveBaseline);
 
     let create_card = widgets::card(
         Some("Create Baseline from Current Scan"),
@@ -45,7 +45,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
                 .width(Length::FillPortion(2)),
             ]
             .spacing(12)
-            .align_items(Alignment::End),
+            .align_y(Alignment::End),
             save_btn,
         ]
         .spacing(10),
@@ -83,13 +83,13 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
 
             let compare_btn = button(text("Compare").color(TEXT).size(11))
                 .padding([4, 10])
-                .style(theme::SecondaryButton)
-                .on_press(Message::BaselineCompared(baseline.id.clone()));
+                .style(theme::secondary_button)
+                .on_press(Message::CompareBaseline(baseline.id.clone()));
 
             let delete_btn = button(text("Delete").color(TEXT).size(11))
                 .padding([4, 10])
-                .style(theme::DangerButton)
-                .on_press(Message::BaselineDeleted(baseline.id.clone()));
+                .style(theme::danger_button)
+                .on_press(Message::DeleteBaseline(baseline.id.clone()));
 
             let baseline_row = row![
                 text(&baseline.name).color(TEXT).size(11).width(Length::FillPortion(2)),
@@ -108,7 +108,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
             ]
             .spacing(8)
             .padding([4, 8])
-            .align_items(Alignment::Center)
+            .align_y(Alignment::Center)
             .width(Length::Fill);
 
             baseline_list = baseline_list.push(baseline_row);
@@ -132,7 +132,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
                 text(format!("Baseline: {}", diff.baseline_name))
                     .color(TEXT)
                     .size(13),
-                iced::widget::horizontal_space(Length::Fill),
+                iced::widget::horizontal_space().width(Length::Fill),
                 text(format!(
                     "New: {} | Removed: {} | Changed Ports: {}",
                     diff.new_hosts.len(),
@@ -142,7 +142,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
                 .color(TEXT_MUTED)
                 .size(12),
             ]
-            .align_items(Alignment::Center)
+            .align_y(Alignment::Center)
             .width(Length::Fill),
         );
 
@@ -210,7 +210,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(theme::AppBackground)
+            .style(theme::app_background)
         .into()
 }
 

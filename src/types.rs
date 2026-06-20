@@ -20,6 +20,23 @@ impl Default for ScanType {
     }
 }
 
+impl ScanType {
+    /// Return all scan types available in the UI.
+    pub fn all_types() -> &'static [ScanType] {
+        &[ScanType::Connect, ScanType::Syn, ScanType::Udp]
+    }
+}
+
+impl std::fmt::Display for ScanType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ScanType::Connect => write!(f, "Connect"),
+            ScanType::Syn => write!(f, "SYN"),
+            ScanType::Udp => write!(f, "UDP"),
+        }
+    }
+}
+
 /// Log level enumeration for scan logging
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum LogLevel {

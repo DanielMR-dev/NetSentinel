@@ -12,23 +12,23 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     let mut content = column![].spacing(16).padding(20).width(Length::Fill);
 
     // ── Header with controls ────────────────────────────────────────────
-    let header = row![
+    let mut header = row![
         text("Scan History")
             .color(TEXT)
             .size(18),
-        iced::widget::horizontal_space(Length::Fill),
-        if app.history_entries.is_empty() {
-            text("").into()
-        } else {
+        iced::widget::horizontal_space().width(Length::Fill),
+    ]
+    .align_y(Alignment::Center)
+    .width(Length::Fill);
+
+    if !app.history_entries.is_empty() {
+        header = header.push(
             button(text("Clear All").color(TEXT).size(12))
                 .padding([4, 12])
-                .style(theme::DangerButton)
-                .on_press(Message::HistoryCleared)
-                .into()
-        },
-    ]
-    .align_items(Alignment::Center)
-    .width(Length::Fill);
+                .style(theme::danger_button)
+                .on_press(Message::ClearHistory),
+        );
+    }
 
     content = content.push(header);
 
@@ -75,13 +75,13 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
                     .size(10),
             )
             .padding([2, 6])
-            .style(theme::SecondaryButton)
+                .style(theme::secondary_button)
             .on_press(Message::HistoryEntryToggled(entry.id.clone()));
 
             let delete_btn = button(text("✕").color(TEXT_MUTED).size(10))
                 .padding([2, 6])
-                .style(theme::DangerButton)
-                .on_press(Message::HistoryEntryDeleted(entry.id.clone()));
+                .style(theme::danger_button)
+                .on_press(Message::DeleteHistoryEntry(entry.id.clone()));
 
             let entry_row = row![
                 text(date_str).color(TEXT).size(11).width(Length::FillPortion(2)),
@@ -101,7 +101,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
             ]
             .spacing(8)
             .padding([4, 8])
-            .align_items(Alignment::Center)
+            .align_y(Alignment::Center)
             .width(Length::Fill);
 
             history_list = history_list.push(entry_row);
@@ -140,7 +140,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
                 let detail_container = container(detail_col)
                     .padding([8, 16])
                     .width(Length::Fill)
-                    .style(theme::CardStyle);
+                    .style(theme::card_style);
 
                 history_list = history_list.push(detail_container);
             }
@@ -158,7 +158,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(theme::AppBackground)
+            .style(theme::app_background)
         .into()
 }
 

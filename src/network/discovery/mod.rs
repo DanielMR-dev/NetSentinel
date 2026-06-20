@@ -15,6 +15,7 @@ use crate::events::AppEvent;
 use crate::types::Device;
 
 /// Maximum concurrent TCP probes during discovery
+#[allow(dead_code)]
 const MAX_CONCURRENT_PROBES: usize = 50;
 
 /// Discover devices using the system's ARP table (preferred method).

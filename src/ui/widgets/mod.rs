@@ -4,23 +4,23 @@
 //! cards, info rows, status badges, port badges, loading spinners,
 //! and privilege banners.
 
-use iced::{Border, Color, Length};
+use iced::{Border, Color, Length, Theme};
 use iced::widget::{container, row, text};
 
 use crate::ui::theme::{
-    self, BG, BORDER_COLOR, DANGER, INFO, PRIMARY, SUCCESS, SURFACE, TEXT, TEXT_MUTED, WARNING,
+    DANGER, INFO, SUCCESS, SURFACE, TEXT, TEXT_MUTED, WARNING, WARNING_BG,
 };
 
 /// Create a styled card container with optional title
 pub fn card<'a, Message: 'a>(
-    title: Option<&'a str>,
+    title: Option<impl ToString>,
     content: impl Into<iced::Element<'a, Message>>,
 ) -> container::Container<'a, Message> {
     let mut col = iced::widget::column![].spacing(8);
 
     if let Some(title) = title {
         col = col.push(
-            text(title)
+            text(title.to_string())
                 .color(TEXT)
                 .size(15),
         );
@@ -31,7 +31,7 @@ pub fn card<'a, Message: 'a>(
     container(col)
         .padding(16)
         .width(Length::Fill)
-        .style(theme::CardStyle)
+        .style(crate::ui::theme::card_style)
 }
 
 /// Create an info row with a label and value
@@ -43,7 +43,7 @@ pub fn info_row<'a, Message: 'a>(
         text(label)
             .color(TEXT_MUTED)
             .size(13),
-        iced::widget::horizontal_space(8),
+        iced::widget::horizontal_space().width(Length::Fixed(8.0)),
         text(value)
             .color(TEXT)
             .size(13),
@@ -64,7 +64,7 @@ pub fn status_badge<'a, Message: 'a>(
 
     container(text(status.to_string()).color(text_color).size(11))
         .padding([2, 8])
-        .style(BadgeStyle(bg_color))
+        .style(move |_theme: &Theme| badge_appearance(bg_color))
 }
 
 /// Create a port state badge
@@ -89,7 +89,7 @@ pub fn port_badge<'a, Message: 'a>(
     row![
         container(text(label).color(TEXT).size(12))
             .padding([2, 6])
-            .style(BadgeStyle(state_color)),
+            .style(move |_theme: &Theme| badge_appearance(state_color)),
     ]
 }
 
@@ -101,7 +101,7 @@ pub fn loading_spinner<'a, Message: 'a>(
         text("[*]")
             .color(INFO)
             .size(14),
-        iced::widget::horizontal_space(8),
+        iced::widget::horizontal_space().width(Length::Fixed(8.0)),
         text(message)
             .color(TEXT_MUTED)
             .size(13),
@@ -135,55 +135,41 @@ pub fn privilege_banner<'a, Message: 'a>(
         container(col)
             .padding(12)
             .width(Length::Fill)
-            .style(WarningBannerStyle),
+            .style(warning_banner_style),
     )
 }
 
-// ── Private Style Structs ───────────────────────────────────────────────
+// ── Private Style Helpers ───────────────────────────────────────────────
 
 /// Badge background style
-struct BadgeStyle(Color);
-
-impl container::StyleSheet for BadgeStyle {
-    type Style = iced::Theme;
-
-    fn appearance(&self, _theme: &Self::Style) -> container::Appearance {
-        container::Appearance {
-            background: Some(iced::Background::Color(Color {
-                r: self.0.r * 0.3,
-                g: self.0.g * 0.3,
-                b: self.0.b * 0.3,
-                a: 1.0,
-            })),
-            border: Border {
-                radius: 4.0.into(),
-                width: 1.0,
-                color: self.0,
-            },
-            text_color: Some(TEXT),
-            ..Default::default()
-        }
+fn badge_appearance(bg_color: Color) -> iced::widget::container::Style {
+    iced::widget::container::Style {
+        background: Some(iced::Background::Color(Color {
+            r: bg_color.r * 0.3,
+            g: bg_color.g * 0.3,
+            b: bg_color.b * 0.3,
+            a: 1.0,
+        })),
+        border: Border {
+            radius: 4.0.into(),
+            width: 1.0,
+            color: bg_color,
+        },
+        text_color: Some(TEXT),
+        ..Default::default()
     }
 }
 
 /// Warning banner style
-struct WarningBannerStyle;
-
-impl container::StyleSheet for WarningBannerStyle {
-    type Style = iced::Theme;
-
-    fn appearance(&self, _theme: &Self::Style) -> container::Appearance {
-        container::Appearance {
-            background: Some(iced::Background::Color(Color::from_rgb8(
-                42, 35, 20,
-            ))),
-            border: Border {
-                radius: 6.0.into(),
-                width: 1.0,
-                color: WARNING,
-            },
-            text_color: Some(TEXT),
-            ..Default::default()
-        }
+fn warning_banner_style(_theme: &Theme) -> iced::widget::container::Style {
+    iced::widget::container::Style {
+        background: Some(iced::Background::Color(WARNING_BG)),
+        border: Border {
+            radius: 6.0.into(),
+            width: 1.0,
+            color: WARNING,
+        },
+        text_color: Some(TEXT),
+        ..Default::default()
     }
 }

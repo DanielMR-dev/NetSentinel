@@ -73,11 +73,11 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         column![
             row![
                 text(format!("Total: {}", cve_count)).color(TEXT).size(13),
-                iced::widget::horizontal_space(16),
+                iced::widget::horizontal_space().width(Length::Fixed(16.0)),
                 text(format!("Critical: {}", critical_count))
                     .color(crate::ui::theme::DANGER)
                     .size(13),
-                iced::widget::horizontal_space(16),
+                iced::widget::horizontal_space().width(Length::Fixed(16.0)),
                 text(format!("High: {}", high_count))
                     .color(crate::ui::theme::WARNING)
                     .size(13),
@@ -132,7 +132,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
             ]
             .spacing(8)
             .padding([4, 8])
-            .align_items(Alignment::Center)
+            .align_y(Alignment::Center)
             .width(Length::Fill);
 
             device_list = device_list.push(device_row);
@@ -141,7 +141,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
 
     let device_card_title = format!("Discovered Devices ({})", device_count);
     let device_card = widgets::card(
-        Some(&device_card_title),
+        Some(device_card_title),
         scrollable(device_list).height(Length::Fixed(300.0)),
     );
 
@@ -150,6 +150,6 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(theme::AppBackground)
+            .style(theme::app_background)
         .into()
 }
