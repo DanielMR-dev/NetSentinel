@@ -31,11 +31,12 @@ use pnet_packet::icmp::echo_request::MutableEchoRequestPacket;
 use pnet_packet::icmp::{IcmpCode, IcmpPacket, IcmpTypes, MutableIcmpPacket};
 use pnet_packet::{MutablePacket, Packet};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-use tauri::Emitter;
+use tokio::sync::mpsc;
 
 use crate::error::ScanError;
+use crate::events::AppEvent;
 use crate::network::{host_discovery, oui};
-use crate::types::{Device, DeviceFoundEvent, DeviceStatus, ScanProgressEvent};
+use crate::types::{Device, DeviceStatus};
 
 /// Maximum concurrent ICMP pings
 const MAX_CONCURRENT_PINGS: usize = 50;
@@ -336,6 +337,21 @@ fn check_privileges_impl() -> Result<(), ScanError> {
     ))
 }
 
+/// Emit a scan_log event to the frontend via the event channel.
+fn emit_log(
+    event_tx: &mpsc::UnboundedSender<AppEvent>,
+    level: &str,
+    message: &str,
+    target: Option<&str>,
+) {
+    let _ = event_tx.send(AppEvent::ScanLog {
+        level: level.to_string(),
+        message: message.to_string(),
+        target: target.map(|s| s.to_string()),
+        timestamp: chrono::Utc::now().timestamp(),
+    });
+}
+
 /// Perform an ICMP ping sweep across multiple hosts concurrently.
 ///
 /// Uses `tokio::task::spawn_blocking` for each ping (since pnet/socket2
@@ -346,7 +362,7 @@ fn check_privileges_impl() -> Result<(), ScanError> {
 /// * `ips` - List of IP addresses to ping
 /// * `timeout_ms` - Timeout per ping in milliseconds
 /// * `max_concurrent` - Maximum number of concurrent pings
-/// * `app` - Tauri AppHandle for emitting events
+/// * `event_tx` - Channel sender for emitting events to the Iced UI
 ///
 /// # Returns
 /// A list of `Device` structs for hosts that responded to ICMP Echo Request.
@@ -354,19 +370,18 @@ pub async fn icmp_ping_sweep(
     ips: Vec<IpAddr>,
     timeout_ms: u64,
     max_concurrent: usize,
-    app: Arc<tauri::AppHandle>,
+    event_tx: mpsc::UnboundedSender<AppEvent>,
 ) -> Result<Vec<Device>, ScanError> {
     let total = ips.len() as u32;
     let scanned = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let devices_found = Arc::new(std::sync::atomic::AtomicU32::new(0));
 
     emit_log(
-        &app,
+        &event_tx,
         "info",
         &format!("Starting ICMP ping sweep for {} hosts (max {} concurrent)", total, max_concurrent),
         None,
-    )
-    .await;
+    );
 
     let effective_concurrency = if max_concurrent == 0 {
         MAX_CONCURRENT_PINGS
@@ -376,7 +391,7 @@ pub async fn icmp_ping_sweep(
 
     let results: Vec<Option<Device>> = stream::iter(ips)
         .map(|ip| {
-            let app = app.clone();
+            let event_tx = event_tx.clone();
             let scanned = scanned.clone();
             let devices_found = devices_found.clone();
 
@@ -420,26 +435,14 @@ pub async fn icmp_ping_sweep(
                         }
 
                         emit_log(
-                            &app,
+                            &event_tx,
                             "info",
                             &format!("ICMP: Host responded: {} (TTL={})", ip_str, ttl),
                             Some(&ip_str),
-                        )
-                        .await;
+                        );
 
                         // Emit device_found event
-                        let event = DeviceFoundEvent {
-                            ip: device.ip.clone(),
-                            mac: device.mac.clone(),
-                            hostname: device.hostname.clone(),
-                            vendor: device.vendor.clone(),
-                            os: device.os.clone(),
-                            timestamp: chrono::Utc::now().timestamp(),
-                            ports: Vec::new(),
-                            discovery_method: "IcmpPing".to_string(),
-                            banner_results: device.banner_results.clone(),
-                        };
-                        let _ = app.emit("device_found", event);
+                        let _ = event_tx.send(AppEvent::DeviceFound(device.clone()));
 
                         devices_found.fetch_add(1, Ordering::SeqCst);
                         Some(device)
@@ -460,14 +463,11 @@ pub async fn icmp_ping_sweep(
 
                 // Emit progress events periodically
                 if current % PROGRESS_INTERVAL == 0 || current == total {
-                    let found_count = devices_found.load(Ordering::SeqCst);
-                    let progress = ScanProgressEvent {
+                    let _ = event_tx.send(AppEvent::ScanProgress {
                         scanned: current,
                         total,
                         current_target: ip_str,
-                        devices_found: found_count,
-                    };
-                    let _ = app.emit("scan_progress", progress);
+                    });
                 }
 
                 device
@@ -480,7 +480,7 @@ pub async fn icmp_ping_sweep(
     let devices: Vec<Device> = results.into_iter().flatten().collect();
 
     emit_log(
-        &app,
+        &event_tx,
         "info",
         &format!(
             "ICMP ping sweep complete: {} hosts responded out of {} scanned",
@@ -488,26 +488,9 @@ pub async fn icmp_ping_sweep(
             total
         ),
         None,
-    )
-    .await;
+    );
 
     Ok(devices)
-}
-
-/// Emit a scan_log event to the frontend.
-async fn emit_log(
-    app: &tauri::AppHandle,
-    level: &str,
-    message: &str,
-    target: Option<&str>,
-) {
-    let log_event = crate::types::ScanLogEvent {
-        level: level.to_string(),
-        message: message.to_string(),
-        target: target.map(|s| s.to_string()),
-        timestamp: chrono::Utc::now().timestamp(),
-    };
-    let _ = app.emit("scan_log", log_event);
 }
 
 // ---------------------------------------------------------------------------

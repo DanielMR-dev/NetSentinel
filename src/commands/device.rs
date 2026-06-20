@@ -1,11 +1,22 @@
-use log::info;
+//! Device information command.
+//!
+//! Provides `get_device_info` as a plain async function that retrieves
+//! hostname, OS name, OS version, and uptime from the local system.
+
 use sysinfo::System;
+use tracing::info;
 
-use crate::commands::{format_uptime, CommandError, DeviceInfo};
+use crate::commands::{format_uptime, DeviceInfo};
 
-/// Get device information (hostname, OS name, OS version, uptime)
-#[tauri::command]
-pub async fn get_device_info() -> Result<DeviceInfo, CommandError> {
+/// Error type for device information retrieval.
+#[derive(thiserror::Error, Debug)]
+pub enum DeviceError {
+    #[error("Failed to retrieve device information: {0}")]
+    InfoError(String),
+}
+
+/// Get device information (hostname, OS name, OS version, uptime).
+pub async fn get_device_info() -> Result<DeviceInfo, DeviceError> {
     let _sys = System::new_all();
 
     let hostname = System::host_name()

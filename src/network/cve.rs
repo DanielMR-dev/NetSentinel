@@ -212,7 +212,6 @@ pub fn lookup_cves(banner_result: &banner::BannerResult) -> Vec<CveMatch> {
 
 /// Update the CVE database with new JSON content.
 /// Validates the JSON content first and writes it safely to disk.
-#[tauri::command]
 pub async fn update_cve_database(json_content: String) -> Result<(), ScanError> {
     // 1. Validate the JSON content first by attempting to load it
     let new_db = CveDatabase::load_from_json(&json_content)?;

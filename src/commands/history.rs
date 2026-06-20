@@ -1,6 +1,6 @@
-//! Scan history Tauri commands.
+//! Scan history commands.
 //!
-//! Provides IPC endpoints for saving, loading, deleting, and clearing
+//! Provides functions for saving, loading, deleting, and clearing
 //! scan history entries.
 
 use crate::commands::settings::get_config_dir;
@@ -9,7 +9,6 @@ use crate::history::{HistoryStore, ScanHistoryEntry};
 use crate::network::sanitize;
 
 /// Save a completed scan to history.
-#[tauri::command]
 pub async fn save_scan_history(entry: ScanHistoryEntry) -> Result<(), ScanError> {
     // Validate inputs
     let _validated_id = sanitize::validate_id(&entry.id)?;
@@ -22,7 +21,6 @@ pub async fn save_scan_history(entry: ScanHistoryEntry) -> Result<(), ScanError>
 
 /// Get all saved scan history entries, sorted by timestamp descending
 /// (newest first).
-#[tauri::command]
 pub async fn get_scan_history() -> Result<Vec<ScanHistoryEntry>, ScanError> {
     let config_dir = get_config_dir()?;
     let store = HistoryStore::new(config_dir);
@@ -30,7 +28,6 @@ pub async fn get_scan_history() -> Result<Vec<ScanHistoryEntry>, ScanError> {
 }
 
 /// Delete a single history entry by ID.
-#[tauri::command]
 pub async fn delete_scan_history_entry(id: String) -> Result<(), ScanError> {
     let validated_id = sanitize::validate_id(&id)?;
 
@@ -40,7 +37,6 @@ pub async fn delete_scan_history_entry(id: String) -> Result<(), ScanError> {
 }
 
 /// Delete all history entries.
-#[tauri::command]
 pub async fn clear_scan_history() -> Result<(), ScanError> {
     let config_dir = get_config_dir()?;
     let store = HistoryStore::new(config_dir);

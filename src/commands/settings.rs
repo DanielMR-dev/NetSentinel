@@ -1,7 +1,7 @@
-//! Settings-related Tauri commands
+//! Settings-related commands.
 
 use std::path::PathBuf;
-use log::{info, error};
+use tracing::{info, error};
 
 use crate::error::ScanError;
 use crate::network::sanitize;
@@ -21,7 +21,6 @@ pub fn create_settings_manager() -> Result<SettingsManager, ScanError> {
 }
 
 /// Get all saved settings profiles
-#[tauri::command]
 pub async fn get_settings_profiles() -> Result<Vec<SettingsProfile>, ScanError> {
     info!("[SETTINGS] get_settings_profiles called");
     let manager = create_settings_manager()?;
@@ -35,7 +34,6 @@ pub async fn get_settings_profiles() -> Result<Vec<SettingsProfile>, ScanError> 
 }
 
 /// Save a settings profile
-#[tauri::command]
 pub async fn save_profile(profile: SettingsProfile) -> Result<(), ScanError> {
     // Validate profile name
     let _validated_name = sanitize::validate_name(&profile.name)?;
@@ -65,7 +63,6 @@ pub async fn save_profile(profile: SettingsProfile) -> Result<(), ScanError> {
 }
 
 /// Delete a settings profile by ID
-#[tauri::command]
 pub async fn delete_profile(id: String) -> Result<(), ScanError> {
     // Validate ID
     let validated_id = sanitize::validate_id(&id)?;
@@ -104,7 +101,6 @@ pub async fn delete_profile(id: String) -> Result<(), ScanError> {
 }
 
 /// Load the current active settings
-#[tauri::command]
 pub async fn load_settings() -> Result<SettingsProfile, ScanError> {
     info!("[SETTINGS] load_settings called");
     let manager = create_settings_manager()?;
@@ -118,14 +114,12 @@ pub async fn load_settings() -> Result<SettingsProfile, ScanError> {
 }
 
 /// Save the current active settings
-#[tauri::command]
 pub async fn save_settings(profile: SettingsProfile) -> Result<(), ScanError> {
     let manager = create_settings_manager()?;
     manager.save_current_settings(&profile).await
 }
 
 /// Get the default settings
-#[tauri::command]
 pub fn get_default_settings() -> Result<SettingsProfile, ScanError> {
     Ok(default_settings())
 }

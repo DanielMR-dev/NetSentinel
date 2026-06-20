@@ -1,3 +1,8 @@
+//! Export commands for audit reports.
+//!
+//! Provides `export_audit_report` for exporting scan results in CSV or JSON
+//! format using a native file dialog.
+
 use std::path::PathBuf;
 use crate::error::ScanError;
 use crate::types::Device;
@@ -49,9 +54,9 @@ fn devices_to_csv(devices: &[Device]) -> String {
     csv
 }
 
-/// Tauri command to export scan report in CSV or JSON format.
+/// Export scan report in CSV or JSON format.
+///
 /// Proposes a native save file dialog to select target file.
-#[tauri::command]
 pub async fn export_audit_report(format: String, devices: Vec<Device>) -> Result<bool, ScanError> {
     let fmt = format.to_lowercase();
     if fmt != "csv" && fmt != "json" {

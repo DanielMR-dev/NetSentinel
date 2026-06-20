@@ -1,30 +1,17 @@
 //! Platform capabilities detection command.
 //!
-//! Provides the `get_platform_capabilities` Tauri command, which detects the
-//! current operating system, privilege level, and available network discovery
-//! capabilities. Called once at frontend startup so the UI can show/hide
-//! discovery methods and display privilege warnings.
+//! Provides `get_platform_capabilities`, which detects the current operating
+//! system, privilege level, and available network discovery capabilities.
+//! Called once at frontend startup so the UI can show/hide discovery methods
+//! and display privilege warnings.
 //!
 //! # Design
 //!
-//! This command **never fails**. Privilege or I/O errors are captured as data
-//! (missing capabilities + human-readable warnings) rather than propagated as
-//! `Err`. The `Result<_, CommandError>` return type is kept for Tauri IPC
-//! consistency only.
-//!
-//! # Capability Detection Strategy
-//!
-//! | Capability   | Detection Method                                      | Privileges Required |
-//! |-------------|------------------------------------------------------|---------------------|
-//! | `tcp_probe` | Always available (uses `tokio::net::TcpStream`)       | None                |
-//! | `arp_scan`  | Attempt to read ARP table via platform provider       | Usually none        |
-//! | `icmp_ping` | `check_icmp_privileges()` (root/CAP_NET_RAW/Admin)   | Elevated            |
-//! | `syn_scan`  | Raw socket creation test                              | Elevated            |
+//! This function **never fails**. Privilege or I/O errors are captured as data
+//! (missing capabilities + human-readable warnings) rather than propagated.
 
 use serde::{Deserialize, Serialize};
 
-use crate::commands::CommandError;
-use crate::network::platform;
 use crate::network::privileges;
 
 /// Platform capabilities response sent to the frontend.
@@ -64,16 +51,15 @@ pub struct PlatformCapabilities {
 
 /// Detect the current platform's network scanning capabilities.
 ///
-/// This command is called once at application startup by the frontend to
+/// This function is called once at application startup by the frontend to
 /// determine which discovery methods should be enabled and whether any
 /// privilege warnings need to be displayed.
 ///
 /// # Returns
 ///
-/// Always returns `Ok(PlatformCapabilities)`. Capability detection failures
-/// are encoded in the `warnings` field rather than as command errors.
-#[tauri::command]
-pub async fn get_platform_capabilities() -> Result<PlatformCapabilities, CommandError> {
+/// Always returns `PlatformCapabilities`. Capability detection failures
+/// are encoded in the `warnings` field rather than as errors.
+pub fn get_platform_capabilities() -> PlatformCapabilities {
     let platform = std::env::consts::OS.to_string();
 
     // Use the comprehensive privilege check
@@ -85,24 +71,9 @@ pub async fn get_platform_capabilities() -> Result<PlatformCapabilities, Command
     // ── TCP probe: always available ─────────────────────────────────────
     capabilities.push("tcp_probe".to_string());
 
-    // ── ARP scan: try reading the ARP table ─────────────────────────────
-    let arp_provider = platform::create_arp_provider();
-    match arp_provider.read_arp_table().await {
-        Ok(entries) => {
-            tracing::info!(
-                "ARP table readable: {} entries found",
-                entries.len()
-            );
-            capabilities.push("arp_scan".to_string());
-        }
-        Err(e) => {
-            tracing::warn!(
-                "ARP table read failed (capability still advertised): {}",
-                e
-            );
-            capabilities.push("arp_scan".to_string());
-        }
-    }
+    // ── ARP scan: always advertised (read-only operation) ────────────────
+    // The actual ARP table read is async; capability is always available.
+    capabilities.push("arp_scan".to_string());
 
     // ── ICMP ping: requires elevated privileges ─────────────────────────
     let is_elevated = priv_status.is_elevated;
@@ -171,12 +142,12 @@ pub async fn get_platform_capabilities() -> Result<PlatformCapabilities, Command
         warnings
     );
 
-    Ok(PlatformCapabilities {
+    PlatformCapabilities {
         platform,
         is_elevated,
         capabilities,
         warnings,
-    })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -186,15 +157,9 @@ pub async fn get_platform_capabilities() -> Result<PlatformCapabilities, Command
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_get_platform_capabilities_returns_ok() {
-        let result = get_platform_capabilities().await;
-        assert!(result.is_ok(), "Command should never fail");
-    }
-
-    #[tokio::test]
-    async fn test_platform_is_valid_os() {
-        let caps = get_platform_capabilities().await.unwrap();
+    #[test]
+    fn test_platform_is_valid_os() {
+        let caps = get_platform_capabilities();
         let valid_platforms = ["linux", "windows", "macos"];
         assert!(
             valid_platforms.contains(&caps.platform.as_str()),
@@ -203,27 +168,27 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_tcp_probe_always_present() {
-        let caps = get_platform_capabilities().await.unwrap();
+    #[test]
+    fn test_tcp_probe_always_present() {
+        let caps = get_platform_capabilities();
         assert!(
             caps.capabilities.contains(&"tcp_probe".to_string()),
             "tcp_probe must always be in capabilities"
         );
     }
 
-    #[tokio::test]
-    async fn test_arp_scan_always_present() {
-        let caps = get_platform_capabilities().await.unwrap();
+    #[test]
+    fn test_arp_scan_always_present() {
+        let caps = get_platform_capabilities();
         assert!(
             caps.capabilities.contains(&"arp_scan".to_string()),
             "arp_scan should always be advertised (read-only operation)"
         );
     }
 
-    #[tokio::test]
-    async fn test_icmp_ping_conditional() {
-        let caps = get_platform_capabilities().await.unwrap();
+    #[test]
+    fn test_icmp_ping_conditional() {
+        let caps = get_platform_capabilities();
 
         if caps.is_elevated {
             assert!(
@@ -246,8 +211,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_serde_camel_case_serialization() {
+    #[test]
+    fn test_serde_camel_case_serialization() {
         let caps = PlatformCapabilities {
             platform: "linux".to_string(),
             is_elevated: true,
@@ -255,7 +220,7 @@ mod tests {
             warnings: vec![],
         };
 
-        let json = serde_json::to_string(&caps).unwrap();
+        let json = serde_json::to_string(&caps).expect("serialization should not fail");
 
         // Verify camelCase field names
         assert!(
@@ -275,8 +240,8 @@ mod tests {
         assert!(json.contains("\"warnings\""));
     }
 
-    #[tokio::test]
-    async fn test_serde_roundtrip() {
+    #[test]
+    fn test_serde_roundtrip() {
         let original = PlatformCapabilities {
             platform: "linux".to_string(),
             is_elevated: false,
@@ -289,8 +254,9 @@ mod tests {
             ],
         };
 
-        let json = serde_json::to_string(&original).unwrap();
-        let deserialized: PlatformCapabilities = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&original).expect("serialization should not fail");
+        let deserialized: PlatformCapabilities =
+            serde_json::from_str(&json).expect("deserialization should not fail");
 
         assert_eq!(original.platform, deserialized.platform);
         assert_eq!(original.is_elevated, deserialized.is_elevated);
@@ -298,9 +264,9 @@ mod tests {
         assert_eq!(original.warnings, deserialized.warnings);
     }
 
-    #[tokio::test]
-    async fn test_capabilities_vec_has_no_duplicates() {
-        let caps = get_platform_capabilities().await.unwrap();
+    #[test]
+    fn test_capabilities_vec_has_no_duplicates() {
+        let caps = get_platform_capabilities();
         let mut seen = std::collections::HashSet::new();
         for cap in &caps.capabilities {
             assert!(
@@ -311,9 +277,9 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_platform_matches_env_consts() {
-        let caps = get_platform_capabilities().await.unwrap();
+    #[test]
+    fn test_platform_matches_env_consts() {
+        let caps = get_platform_capabilities();
         assert_eq!(caps.platform, std::env::consts::OS);
     }
 }

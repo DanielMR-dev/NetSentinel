@@ -1,11 +1,9 @@
-//! Baseline-related Tauri commands.
+//! Baseline-related commands.
 //!
-//! Provides IPC endpoints for saving, loading, deleting, and comparing
+//! Provides functions for saving, loading, deleting, and comparing
 //! network baselines.
 
 use std::sync::Arc;
-
-use tauri::State;
 
 use crate::baseline::{Baseline, BaselineDiff, BaselineStore, compute_diff};
 use crate::commands::settings::get_config_dir;
@@ -14,7 +12,6 @@ use crate::network::sanitize;
 use crate::state::SharedScanState;
 
 /// Save a network baseline snapshot.
-#[tauri::command]
 pub async fn save_baseline(baseline: Baseline) -> Result<String, ScanError> {
     // Validate inputs
     let _name = sanitize::validate_name(&baseline.name)?;
@@ -33,7 +30,6 @@ pub async fn save_baseline(baseline: Baseline) -> Result<String, ScanError> {
 }
 
 /// Get all saved baselines.
-#[tauri::command]
 pub async fn get_baselines() -> Result<Vec<Baseline>, ScanError> {
     let config_dir = get_config_dir()?;
     let store = BaselineStore::new(config_dir);
@@ -44,7 +40,6 @@ pub async fn get_baselines() -> Result<Vec<Baseline>, ScanError> {
 }
 
 /// Delete a baseline by ID.
-#[tauri::command]
 pub async fn delete_baseline(id: String) -> Result<(), ScanError> {
     let validated_id = sanitize::validate_id(&id)?;
 
@@ -57,10 +52,9 @@ pub async fn delete_baseline(id: String) -> Result<(), ScanError> {
 }
 
 /// Compare a baseline against current scan results.
-#[tauri::command]
 pub async fn compare_baseline(
     id: String,
-    state: State<'_, Arc<SharedScanState>>,
+    state: Arc<SharedScanState>,
 ) -> Result<BaselineDiff, ScanError> {
     let validated_id = sanitize::validate_id(&id)?;
 

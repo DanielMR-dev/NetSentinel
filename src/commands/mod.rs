@@ -1,5 +1,11 @@
+//! Command modules for the NetSentinel backend.
+//!
+//! Each submodule exposes plain `pub async fn` functions that operate on
+//! `Arc<SharedScanState>` directly, replacing the old Tauri `#[command]`
+//! and `State<>` patterns.
+
 pub mod baseline;
-mod device;
+pub mod device;
 pub mod export;
 pub mod history;
 pub mod network;
@@ -9,23 +15,9 @@ pub mod scan;
 pub mod settings;
 
 use serde::Serialize;
-use thiserror::Error;
 
-/// Custom error type for Tauri commands
-#[derive(Error, Debug, Serialize)]
-pub enum CommandError {
-    #[error("Failed to retrieve system information: {0}")]
-    SystemError(String),
-
-    #[error("No network interface found")]
-    NoNetworkInterface,
-
-    #[error("Failed to format uptime: {0}")]
-    FormatError(String),
-}
-
-/// Device information returned by get_device_info command
-#[derive(Serialize)]
+/// Device information returned by `get_device_info`
+#[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceInfo {
     pub hostname: String,
@@ -34,8 +26,8 @@ pub struct DeviceInfo {
     pub uptime: String,
 }
 
-/// Network information returned by get_network_info command
-#[derive(Serialize)]
+/// Network information returned by `get_network_info`
+#[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkInfo {
     pub ip_address: String,
@@ -67,26 +59,24 @@ pub use network::get_network_info;
 pub use platform::get_platform_capabilities;
 
 // Re-export scan commands
-pub use scan::{start_scan, stop_scan, pause_scan, resume_scan, get_scan_results};
+pub use scan::{get_scan_results, pause_scan, resume_scan, start_scan, stop_scan};
 
 // Re-export export commands
 pub use export::export_audit_report;
 
 // Re-export settings commands
 pub use settings::{
-    get_settings_profiles, save_profile, delete_profile, load_settings, save_settings,
-    get_default_settings,
+    delete_profile, get_default_settings, get_settings_profiles, load_settings, save_profile,
+    save_settings,
 };
 
 // Re-export history commands
 pub use history::{
-    save_scan_history, get_scan_history, delete_scan_history_entry, clear_scan_history,
+    clear_scan_history, delete_scan_history_entry, get_scan_history, save_scan_history,
 };
 
 // Re-export baseline commands
-pub use baseline::{
-    save_baseline, get_baselines, delete_baseline, compare_baseline,
-};
+pub use baseline::{compare_baseline, delete_baseline, get_baselines, save_baseline};
 
 // Re-export privilege command
 pub use privilege::check_privilege_status;

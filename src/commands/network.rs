@@ -1,8 +1,20 @@
-use log::info;
-use sysinfo::Networks;
+//! Network information command.
+//!
+//! Provides `get_network_info` as a plain async function that retrieves
+//! IP address, MAC address, gateway, and network name from the local system.
 
-use crate::commands::{CommandError, NetworkInfo};
+use sysinfo::Networks;
+use tracing::info;
+
+use crate::commands::NetworkInfo;
 use crate::network::platform;
+
+/// Error type for network information retrieval.
+#[derive(thiserror::Error, Debug)]
+pub enum NetworkCommandError {
+    #[error("Failed to retrieve network information: {0}")]
+    InfoError(String),
+}
 
 /// Get the default gateway IP using the platform-specific gateway provider.
 ///
@@ -15,9 +27,8 @@ async fn get_default_gateway() -> Option<String> {
     provider.get_default_gateway().await
 }
 
-/// Get network information (IP address, MAC address, gateway, network name)
-#[tauri::command]
-pub async fn get_network_info() -> Result<NetworkInfo, CommandError> {
+/// Get network information (IP address, MAC address, gateway, network name).
+pub async fn get_network_info() -> Result<NetworkInfo, NetworkCommandError> {
     let networks = Networks::new_with_refreshed_list();
 
     let mut ip_address = String::from("unknown");

@@ -1,6 +1,6 @@
-//! Privilege status Tauri command.
+//! Privilege status command.
 //!
-//! Provides an IPC endpoint for checking the current process's
+//! Provides an endpoint for checking the current process's
 //! privilege status and available scanning capabilities.
 
 use crate::error::ScanError;
@@ -11,7 +11,6 @@ use crate::network::privileges::{self, PrivilegeStatus};
 /// Returns a comprehensive report of available capabilities including
 /// raw socket access, CAP_NET_RAW, SYN scan availability, and ICMP
 /// availability.
-#[tauri::command]
 pub async fn check_privilege_status() -> Result<PrivilegeStatus, ScanError> {
     // Privilege checks involve file I/O and process spawning,
     // so we use spawn_blocking to avoid blocking the async runtime.

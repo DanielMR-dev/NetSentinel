@@ -4,12 +4,12 @@ use std::time::Duration;
 
 use futures::stream::{self, StreamExt};
 use tokio::net::TcpStream;
-use tokio::sync::Semaphore;
-use tauri::Emitter;
+use tokio::sync::{mpsc, Semaphore};
 
 use crate::error::ScanError;
+use crate::events::AppEvent;
 use crate::network::oui;
-use crate::types::{Device, DeviceFoundEvent, DeviceStatus, Port, PortState, ScanProgressEvent};
+use crate::types::{Device, DeviceStatus, Port, PortState};
 
 /// Default maximum concurrent host checks
 const DEFAULT_MAX_CONCURRENT_HOSTS: usize = 50;
@@ -26,20 +26,19 @@ pub const DEFAULT_PORTS: &[u16] = &[
     3306, 3389, 5432, 5900, 6379, 8080, 8443,
 ];
 
-/// Emit a scan_log event to the frontend
-async fn emit_log(
-    app: &tauri::AppHandle,
+/// Emit a scan_log event to the frontend via the event channel.
+fn emit_log(
+    event_tx: &mpsc::UnboundedSender<AppEvent>,
     level: &str,
     message: &str,
     target: Option<&str>,
 ) {
-    let log_event = crate::types::ScanLogEvent {
+    let _ = event_tx.send(AppEvent::ScanLog {
         level: level.to_string(),
         message: message.to_string(),
         target: target.map(|s| s.to_string()),
         timestamp: chrono::Utc::now().timestamp(),
-    };
-    let _ = app.emit("scan_log", log_event);
+    });
 }
 
 /// Discover live hosts by TCP probing common ports.
@@ -50,13 +49,13 @@ async fn emit_log(
 ///
 /// # Arguments
 /// * `ips` - List of IP addresses to probe
-/// * `app` - Tauri AppHandle for emitting events
+/// * `event_tx` - Channel sender for emitting events to the Iced UI
 /// * `cancel_rx` - Cancellation receiver
 /// * `max_concurrent` - Maximum concurrent host probes (0 = use default of 50)
 /// * `retry_count` - Number of retries for failed host probes
 pub async fn discover_hosts(
     ips: Vec<IpAddr>,
-    app: Arc<tauri::AppHandle>,
+    event_tx: mpsc::UnboundedSender<AppEvent>,
     cancel_rx: tokio::sync::oneshot::Receiver<()>,
     max_concurrent: usize,
     retry_count: u32,
@@ -72,40 +71,37 @@ pub async fn discover_hosts(
     let total = ips.len() as u32;
     let scanned = Arc::new(std::sync::atomic::AtomicU32::new(0));
 
-
-
     emit_log(
-        &app,
+        &event_tx,
         "info",
         &format!(
             "Starting host discovery for {} targets (max {} concurrent, {} retries)",
             total, effective_concurrency, retry_count
         ),
         None,
-    )
-    .await;
+    );
 
     // Wrap the entire stream collection in tokio::select! so that cancellation
     // drops the stream and all in-flight tasks immediately.
     let result = tokio::select! {
         _ = &mut cancel_rx => {
-            emit_log(&app, "warn", "Scan cancelled by user", None).await;
+            emit_log(&event_tx, "warn", "Scan cancelled by user", None);
             let partial = found_devices.lock().await.clone();
             emit_log(
-                &app,
+                &event_tx,
                 "info",
                 &format!(
                     "Scan cancelled. {} devices found before cancellation",
                     partial.len()
                 ),
                 None,
-            ).await;
+            );
             return Ok(partial);
         }
         _results = stream::iter(ips)
             .map(|ip| {
                 let sem = semaphore.clone();
-                let app = app.clone();
+                let event_tx = event_tx.clone();
                 let found = found_devices.clone();
                 let scanned = scanned.clone();
 
@@ -120,11 +116,11 @@ pub async fn discover_hosts(
                     // Emit log for debug purposes every N hosts
                     if current % PROGRESS_INTERVAL == 0 || current == 1 {
                         emit_log(
-                            &app,
+                            &event_tx,
                             "debug",
                             &format!("Scanning {} ({}/{})", target_str, current, total),
                             Some(&target_str),
-                        ).await;
+                        );
                     }
 
                     // TCP probe to check if host is alive (with retry)
@@ -132,11 +128,11 @@ pub async fn discover_hosts(
 
                     if is_alive {
                         emit_log(
-                            &app,
+                            &event_tx,
                             "info",
                             &format!("Host found: {}", target_str),
                             Some(&target_str),
-                        ).await;
+                        );
 
                         let mut device = Device::new(ip.to_string());
                         device.status = DeviceStatus::Online;
@@ -156,30 +152,17 @@ pub async fn discover_hosts(
 
                         found.lock().await.push(device.clone());
 
-                        // Emit device found event with discovery method
-                        let event = DeviceFoundEvent {
-                            ip: device.ip.clone(),
-                            mac: device.mac.clone(),
-                            hostname: device.hostname.clone(),
-                            vendor: device.vendor.clone(),
-                            os: device.os.clone(),
-                            timestamp: chrono::Utc::now().timestamp(),
-                            ports: Vec::new(),
-                            discovery_method: "TcpProbe".to_string(),
-                            banner_results: device.banner_results.clone(),
-                        };
-                        let _ = app.emit("device_found", event);
+                        // Emit device found event
+                        let _ = event_tx.send(AppEvent::DeviceFound(device));
                     }
 
                     // Emit progress every N hosts
                     if current % PROGRESS_INTERVAL == 0 {
-                        let progress = ScanProgressEvent {
+                        let _ = event_tx.send(AppEvent::ScanProgress {
                             scanned: current,
                             total,
                             current_target: target_str,
-                            devices_found: found.lock().await.len() as u32,
-                        };
-                        let _ = app.emit("scan_progress", progress);
+                        });
                     }
 
                     Some(is_alive)
@@ -190,11 +173,11 @@ pub async fn discover_hosts(
             .collect::<Vec<bool>>() => {
             let result = found_devices.lock().await.clone();
             emit_log(
-                &app,
+                &event_tx,
                 "info",
                 &format!("Host discovery complete. Found {} devices", result.len()),
                 None,
-            ).await;
+            );
             Ok(result)
         }
     };
@@ -393,4 +376,3 @@ async fn scan_single_port(ip: IpAddr, port: u16, timeout_ms: u64) -> PortState {
         Err(_) => PortState::Filtered,
     }
 }
-
