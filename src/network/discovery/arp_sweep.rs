@@ -107,22 +107,29 @@ pub async fn arp_sweep(
         }
     });
 
-    // Send ARP requests
-    for target_ip in ips.iter() {
-        if !state.is_running() {
-            break;
-        }
-
-        let packet = craft_arp_request(src_mac, src_ip, *target_ip);
-        if let Some(send_res) = tx.send_to(&packet, None) {
-            if let Err(e) = send_res {
-                tracing::warn!("Failed to send ARP request for {}: {}", target_ip, e);
+    // Send ARP requests using spawn_blocking to avoid blocking the Tokio executor
+    let state_for_send = state.clone();
+    let ips_clone = ips.clone();
+    
+    let send_task = tokio::task::spawn_blocking(move || {
+        for target_ip in ips_clone.iter() {
+            if !state_for_send.is_running() {
+                break;
             }
-        }
 
-        // Small inter-packet delay to prevent flooding (e.g. 1ms)
-        std::thread::sleep(Duration::from_millis(1));
-    }
+            let packet = craft_arp_request(src_mac, src_ip, *target_ip);
+            if let Some(send_res) = tx.send_to(&packet, None) {
+                if let Err(e) = send_res {
+                    tracing::warn!("Failed to send ARP request for {}: {}", target_ip, e);
+                }
+            }
+
+            // Small inter-packet delay to prevent flooding (e.g. 1ms)
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    });
+
+    let _ = send_task.await;
 
     // Wait for final replies to arrive
     let deadline = Instant::now() + timeout;

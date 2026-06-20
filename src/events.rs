@@ -55,6 +55,19 @@ pub enum AppEvent {
     // ---- Privilege Events ----
     /// Privilege status report (emmited at startup and on-demmand)
     PrivilegeStatus(PrivilegeStatus),
+
+    /// A command triggered from an external IPC tool
+    IpcCommand(String),
+
+    /// A security alert triggered from an external IPC tool
+    SecurityAlert {
+        source_tool: String,
+        severity: String,
+        title: String,
+        description: String,
+        target_artifact: String,
+        timestamp: i64,
+    },
 }
 
 /// Scan events used by the scanning engine for streaming progess.

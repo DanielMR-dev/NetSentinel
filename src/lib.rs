@@ -12,6 +12,7 @@ pub mod settings;
 pub mod state;
 pub mod types;
 pub mod ui;
+pub mod ipc;
 
 // ── Re-exports for convenient access ────────────────────────────────────
 

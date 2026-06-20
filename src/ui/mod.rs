@@ -108,12 +108,17 @@ pub enum Message {
 
     // Scan events (from subscription)
     DeviceDiscovered(Device),
+    DevicesDiscovered(Vec<Device>),
     ScanProgress { scanned: u32, total: u32, target: String },
     ScanCompleted { scan_id: String, device_count: u32, duration_ms: u64 },
     ScanLogReceived { level: String, message: String, target: Option<String>, timestamp: i64 },
     CveAlertReceived(CveMatch),
     ScanStartResult(Result<String, String>),
     ScanStopResult(Result<(), String>),
+    
+    // IPC
+    IpcServerStopped(Result<(), String>),
+    IpcCommandReceived(String),
 
     // Device selection
     DeviceSelected(Option<usize>),
@@ -197,6 +202,7 @@ pub struct NetSentinelApp {
     scan_state: Arc<SharedScanState>,
     event_rx: Arc<std::sync::Mutex<Option<mpsc::UnboundedReceiver<AppEvent>>>>,
     event_tx: Option<mpsc::UnboundedSender<AppEvent>>,
+    ipc_rx: Arc<std::sync::Mutex<Option<mpsc::Receiver<AppEvent>>>>,
 
     // System info
     device_info: Option<DeviceInfo>,
@@ -255,11 +261,15 @@ impl NetSentinelApp {
         let scan_state = Arc::new(SharedScanState::new());
         let event_rx_arc = Arc::new(std::sync::Mutex::new(None));
 
+        let (ipc_tx, ipc_rx) = mpsc::channel(1024);
+        let ipc_rx_arc = Arc::new(std::sync::Mutex::new(Some(ipc_rx)));
+
         let app = Self {
             current_page: Page::Dashboard,
             scan_state,
             event_rx: event_rx_arc,
             event_tx: None,
+            ipc_rx: ipc_rx_arc,
             device_info: None,
             network_info: None,
             privilege_status: None,
@@ -297,6 +307,14 @@ impl NetSentinelApp {
         };
 
         // Load initial data
+        let ipc_task = Task::perform(
+            async move {
+                let _ = crate::ipc::IpcServer::new("/tmp/nexus_central.sock").run(ipc_tx).await;
+                Ok(())
+            },
+            Message::IpcServerStopped,
+        );
+
         let init_task = Task::batch(vec![
             load_device_info(),
             load_network_info(),
@@ -306,6 +324,7 @@ impl NetSentinelApp {
             load_settings_profiles(),
             load_history(),
             load_baselines(),
+            ipc_task,
         ]);
 
         (app, init_task)
@@ -531,6 +550,24 @@ impl NetSentinelApp {
             Message::DeviceDiscovered(device) => {
                 self.discovered_devices.push(device);
                 self.update_filtered_devices();
+                Task::none()
+            }
+
+            Message::DevicesDiscovered(devices) => {
+                self.discovered_devices.extend(devices);
+                self.update_filtered_devices();
+                Task::none()
+            }
+
+            Message::IpcServerStopped(result) => {
+                if let Err(e) = result {
+                    self.status_message = Some(format!("IPC Server failed: {}", e));
+                }
+                Task::none()
+            }
+
+            Message::IpcCommandReceived(cmd) => {
+                self.status_message = Some(format!("Received command: {}", cmd));
                 Task::none()
             }
 
@@ -1194,74 +1231,125 @@ impl NetSentinelApp {
             .into()
     }
 
-    /// Subscribe to backend events when scanning is active
+    /// Subscribe to backend events when scanning is active and globally for IPC
     fn subscription(&self) -> Subscription<Message> {
+        let mut subs = Vec::new();
+
+        // 1. IPC Subscription (Always running)
+        let ipc_rx_arc = self.ipc_rx.clone();
+        subs.push(Subscription::run_with_id(
+            "ipc-events",
+            iced::stream::channel(100, move |mut output| async move {
+                let mut receiver = {
+                    let mut guard = ipc_rx_arc.lock().unwrap_or_else(|e| e.into_inner());
+                    guard.take()
+                };
+
+                if let Some(ref mut rx) = receiver {
+                    let mut buffer = Vec::new();
+                    let mut interval = tokio::time::interval(std::time::Duration::from_millis(200));
+
+                    loop {
+                        tokio::select! {
+                            _ = interval.tick() => {
+                                if !buffer.is_empty() {
+                                    let batch = std::mem::take(&mut buffer);
+                                    if output.send(Message::DevicesDiscovered(batch)).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            }
+                            event = rx.recv() => {
+                                match event {
+                                    Some(AppEvent::DeviceFound(device)) => {
+                                        buffer.push(device);
+                                    }
+                                    Some(AppEvent::IpcCommand(cmd)) => {
+                                        if output.send(Message::IpcCommandReceived(cmd)).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                    Some(AppEvent::SecurityAlert { source_tool, severity, title, description, target_artifact, timestamp }) => {
+                                        let message = format!("[{}] {}: {} ({})", source_tool, title, description, target_artifact);
+                                        if output.send(Message::ScanLogReceived {
+                                            level: severity,
+                                            message,
+                                            target: None,
+                                            timestamp,
+                                        }).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                    Some(_) => {} // Ignore other events for IPC
+                                    None => break, // Channel closed
+                                }
+                            }
+                        }
+                    }
+                }
+                std::future::pending::<()>().await;
+            }),
+        ));
+
+        // 2. Scanner Subscription
         if self.is_scanning {
             let rx = self.event_rx.clone();
-
-            Subscription::run_with_id(
+            subs.push(Subscription::run_with_id(
                 "scan-events",
                 iced::stream::channel(100, move |mut output| async move {
-                    // Take the receiver from the shared Arc (std::sync::Mutex — synchronous lock)
                     let mut receiver = {
                         let mut guard = rx.lock().unwrap_or_else(|e| e.into_inner());
                         guard.take()
                     };
 
                     if let Some(ref mut rx) = receiver {
-                        while let Some(event) = rx.recv().await {
-                            let msg = match event {
-                                AppEvent::DeviceFound(device) => {
-                                    Message::DeviceDiscovered(device)
-                                }
-                                AppEvent::ScanProgress { scanned, total, current_target } => {
-                                    Message::ScanProgress {
-                                        scanned,
-                                        total,
-                                        target: current_target,
-                                    }
-                                }
-                                AppEvent::ScanComplete { scan_id, device_count, duration_ms, status: _ } => {
-                                    Message::ScanCompleted {
-                                        scan_id,
-                                        device_count,
-                                        duration_ms,
-                                    }
-                                }
-                                AppEvent::ScanLog { level, message, target, timestamp } => {
-                                    Message::ScanLogReceived {
-                                        level,
-                                        message,
-                                        target,
-                                        timestamp,
-                                    }
-                                }
-                                AppEvent::BannerFound(_) => {
-                                    // Banner events are handled via DeviceFound
-                                    continue;
-                                }
-                                AppEvent::CveAlert(cve) => {
-                                    Message::CveAlertReceived(cve)
-                                }
-                                AppEvent::PrivilegeStatus(_) => {
-                                    // Privilege status is loaded at startup
-                                    continue;
-                                }
-                            };
+                        let mut buffer = Vec::new();
+                        let mut interval = tokio::time::interval(std::time::Duration::from_millis(200));
 
-                            if output.send(msg).await.is_err() {
-                                break;
+                        loop {
+                            tokio::select! {
+                                _ = interval.tick() => {
+                                    if !buffer.is_empty() {
+                                        let batch = std::mem::take(&mut buffer);
+                                        if output.send(Message::DevicesDiscovered(batch)).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                }
+                                event = rx.recv() => {
+                                    match event {
+                                        Some(AppEvent::DeviceFound(device)) => {
+                                            buffer.push(device);
+                                        }
+                                        Some(AppEvent::ScanProgress { scanned, total, current_target }) => {
+                                            if output.send(Message::ScanProgress { scanned, total, target: current_target }).await.is_err() { break; }
+                                        }
+                                        Some(AppEvent::ScanComplete { scan_id, device_count, duration_ms, status: _ }) => {
+                                            if !buffer.is_empty() {
+                                                let batch = std::mem::take(&mut buffer);
+                                                let _ = output.send(Message::DevicesDiscovered(batch)).await;
+                                            }
+                                            if output.send(Message::ScanCompleted { scan_id, device_count, duration_ms }).await.is_err() { break; }
+                                        }
+                                        Some(AppEvent::ScanLog { level, message, target, timestamp }) => {
+                                            if output.send(Message::ScanLogReceived { level, message, target, timestamp }).await.is_err() { break; }
+                                        }
+                                        Some(AppEvent::CveAlert(cve)) => {
+                                            if output.send(Message::CveAlertReceived(cve)).await.is_err() { break; }
+                                        }
+                                        Some(_) => {}
+                                        None => break,
+                                    }
+                                }
                             }
                         }
                     }
-
-                    // Keep subscription alive even if receiver is gone
                     std::future::pending::<()>().await;
                 }),
-            )
-        } else {
-            Subscription::none()
+            ));
         }
+
+        Subscription::batch(subs)
     }
 }
 
