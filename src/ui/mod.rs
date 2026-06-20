@@ -27,7 +27,7 @@ use crate::commands::platform::PlatformCapabilities;
 use crate::settings::SettingsProfile;
 use crate::state::SharedScanState;
 use crate::types::{Device, ScanType};
-use crate::ui::theme::{TEXT, TEXT_MUTED};
+
 
 pub mod theme;
 pub mod views;
@@ -65,6 +65,22 @@ impl Page {
             Page::Baseline,
         ]
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortField {
+    Ip,
+    Mac,
+    Vendor,
+    Hostname,
+    OpenPorts,
+    LastSeen,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortDirection {
+    Asc,
+    Desc,
 }
 
 // ── Message Enum ────────────────────────────────────────────────────────
@@ -145,10 +161,19 @@ pub enum Message {
     ExportJson,
     ExportCompleted(Result<bool, String>),
 
+    // Search / Filter / Sort / Theme
+    SearchQueryChanged(String),
+    FilterStatusChanged(String),
+    FilterHasOpenPortsToggled(bool),
+    SortTableBy(SortField),
+    ClearFilters,
+    ToggleTheme,
+
     // UI
     StatusDismissed,
     Tick,
 }
+
 
 // ── Scan Log Entry (UI display) ─────────────────────────────────────────
 
@@ -193,6 +218,15 @@ pub struct NetSentinelApp {
     scan_logs: Vec<ScanLogEntry>,
     selected_device: Option<Device>,
 
+    // Search/filtering/sorting
+    pub search_query: String,
+    pub filter_status: String,
+    pub filter_has_open_ports: bool,
+    pub sort_field: SortField,
+    pub sort_direction: SortDirection,
+    pub filtered_devices: Vec<Device>,
+    pub theme_dark: bool,
+
     // Settings
     settings_profile: SettingsProfile,
     settings_profiles: Vec<SettingsProfile>,
@@ -231,7 +265,7 @@ impl NetSentinelApp {
             privilege_status: None,
             platform_caps: None,
             scan_cidr: "192.168.1.0/24".to_string(),
-            scan_ports_str: String::new(),
+            scan_ports_str: "21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1723,3306,3389,5900,8080".to_string(),
             scan_type: ScanType::Connect,
             is_scanning: false,
             is_paused: false,
@@ -242,6 +276,13 @@ impl NetSentinelApp {
             discovered_devices: Vec::new(),
             scan_logs: Vec::new(),
             selected_device: None,
+            search_query: String::new(),
+            filter_status: "all".to_string(),
+            filter_has_open_ports: false,
+            sort_field: SortField::Ip,
+            sort_direction: SortDirection::Asc,
+            filtered_devices: Vec::new(),
+            theme_dark: true,
             settings_profile: SettingsProfile::default_profile(),
             settings_profiles: Vec::new(),
             history_entries: Vec::new(),
@@ -270,6 +311,75 @@ impl NetSentinelApp {
         (app, init_task)
     }
 
+    /// Dynamic helper to filter and sort discovered devices, caching the result in filtered_devices.
+    pub fn update_filtered_devices(&mut self) {
+        let mut devices = self.discovered_devices.clone();
+
+        // 1. Filter by Search Query
+        if !self.search_query.is_empty() {
+            let query = self.search_query.to_lowercase();
+            devices.retain(|d| {
+                d.ip.to_lowercase().contains(&query)
+                    || d.mac.to_lowercase().contains(&query)
+                    || d.hostname.as_ref().map(|h| h.to_lowercase().contains(&query)).unwrap_or(false)
+                    || d.vendor.as_ref().map(|v| v.to_lowercase().contains(&query)).unwrap_or(false)
+            });
+        }
+
+        // 2. Filter by Status
+        if self.filter_status != "all" {
+            let status = self.filter_status.to_lowercase();
+            devices.retain(|d| {
+                let status_str = format!("{:?}", d.status).to_lowercase();
+                status_str == status
+            });
+        }
+
+        // 3. Filter by Open Ports
+        if self.filter_has_open_ports {
+            devices.retain(|d| {
+                d.ports.iter().any(|p| format!("{:?}", p.state).to_lowercase() == "open")
+            });
+        }
+
+        // 4. Sort
+        let field = self.sort_field;
+        let direction = self.sort_direction;
+        devices.sort_by(|a, b| {
+            let ordering = match field {
+                SortField::Ip => {
+                    let a_parts: Vec<u32> = a.ip.split('.').filter_map(|p| p.parse().ok()).collect();
+                    let b_parts: Vec<u32> = b.ip.split('.').filter_map(|p| p.parse().ok()).collect();
+                    a_parts.cmp(&b_parts)
+                }
+                SortField::Mac => a.mac.cmp(&b.mac),
+                SortField::Vendor => {
+                    let a_v = a.vendor.as_deref().unwrap_or("");
+                    let b_v = b.vendor.as_deref().unwrap_or("");
+                    a_v.cmp(b_v)
+                }
+                SortField::Hostname => {
+                    let a_h = a.hostname.as_deref().unwrap_or("");
+                    let b_h = b.hostname.as_deref().unwrap_or("");
+                    a_h.cmp(b_h)
+                }
+                SortField::OpenPorts => {
+                    let a_open = a.ports.iter().filter(|p| format!("{:?}", p.state).to_lowercase() == "open").count();
+                    let b_open = b.ports.iter().filter(|p| format!("{:?}", p.state).to_lowercase() == "open").count();
+                    a_open.cmp(&b_open)
+                }
+                SortField::LastSeen => a.last_seen.cmp(&b.last_seen),
+            };
+
+            match direction {
+                SortDirection::Asc => ordering,
+                SortDirection::Desc => ordering.reverse(),
+            }
+        });
+
+        self.filtered_devices = devices;
+    }
+
     /// Handle state updates and dispatch async commands
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
@@ -289,7 +399,20 @@ impl NetSentinelApp {
             }
             Message::NetworkInfoLoaded(result) => {
                 match result {
-                    Ok(info) => self.network_info = Some(info),
+                    Ok(info) => {
+                        let cidr = if !info.gateway.is_empty() && info.gateway != "Unknown" && info.gateway != "0.0.0.0" {
+                            calculate_cidr(&info.gateway)
+                        } else if !info.ip_address.is_empty() && info.ip_address != "Unknown" {
+                            calculate_cidr(&info.ip_address)
+                        } else {
+                            "192.168.1.0/24".to_string()
+                        };
+                        // Override default CIDR with detected one, unless user settings already customized it
+                        if self.scan_cidr == "192.168.1.0/24" {
+                            self.scan_cidr = cidr;
+                        }
+                        self.network_info = Some(info);
+                    }
                     Err(e) => self.status_message = Some(format!("Failed to load network info: {}", e)),
                 }
                 Task::none()
@@ -319,6 +442,7 @@ impl NetSentinelApp {
                 self.scan_progress = 0.0;
                 self.scan_scanned = 0;
                 self.discovered_devices.clear();
+                self.filtered_devices.clear();
                 self.scan_logs.clear();
                 self.selected_device = None;
                 self.cve_alerts.clear();
@@ -406,6 +530,7 @@ impl NetSentinelApp {
             // ── Scan Events ─────────────────────────────────────────────
             Message::DeviceDiscovered(device) => {
                 self.discovered_devices.push(device);
+                self.update_filtered_devices();
                 Task::none()
             }
 
@@ -427,6 +552,7 @@ impl NetSentinelApp {
                 if let Ok(mut guard) = self.event_rx.lock() {
                     *guard = None;
                 }
+                self.update_filtered_devices();
                 Task::none()
             }
 
@@ -476,7 +602,48 @@ impl NetSentinelApp {
 
             // ── Device Selection ────────────────────────────────────────
             Message::DeviceSelected(idx) => {
-                self.selected_device = idx.and_then(|i| self.discovered_devices.get(i).cloned());
+                self.selected_device = idx.and_then(|i| self.filtered_devices.get(i).cloned());
+                Task::none()
+            }
+
+            // ── Search / Filter / Sort / Theme ─────────────────────────
+            Message::SearchQueryChanged(query) => {
+                self.search_query = query;
+                self.update_filtered_devices();
+                Task::none()
+            }
+            Message::FilterStatusChanged(status) => {
+                self.filter_status = status;
+                self.update_filtered_devices();
+                Task::none()
+            }
+            Message::FilterHasOpenPortsToggled(val) => {
+                self.filter_has_open_ports = val;
+                self.update_filtered_devices();
+                Task::none()
+            }
+            Message::SortTableBy(field) => {
+                if self.sort_field == field {
+                    self.sort_direction = match self.sort_direction {
+                        SortDirection::Asc => SortDirection::Desc,
+                        SortDirection::Desc => SortDirection::Asc,
+                    };
+                } else {
+                    self.sort_field = field;
+                    self.sort_direction = SortDirection::Asc;
+                }
+                self.update_filtered_devices();
+                Task::none()
+            }
+            Message::ClearFilters => {
+                self.search_query.clear();
+                self.filter_status = "all".to_string();
+                self.filter_has_open_ports = false;
+                self.update_filtered_devices();
+                Task::none()
+            }
+            Message::ToggleTheme => {
+                self.theme_dark = !self.theme_dark;
                 Task::none()
             }
 
@@ -491,7 +658,13 @@ impl NetSentinelApp {
 
             Message::SettingsLoaded(result) => {
                 match result {
-                    Ok(profile) => self.settings_profile = profile,
+                    Ok(profile) => {
+                        self.settings_profile = profile.clone();
+                        // Sync profile default CIDR if it has been customized
+                        if profile.scan_config.default_cidr != "192.168.1.0/24" && !profile.scan_config.default_cidr.is_empty() {
+                            self.scan_cidr = profile.scan_config.default_cidr.clone();
+                        }
+                    }
                     Err(e) => self.status_message = Some(format!("Failed to load settings: {}", e)),
                 }
                 Task::none()
@@ -827,13 +1000,13 @@ impl NetSentinelApp {
 
     /// Render the current view based on the active page
     fn view(&self) -> Element<'_, Message> {
-        // Navigation bar
-        let nav = self.view_nav();
+        // Persistent Top Header
+        let header = self.view_header();
 
-        // Status bar
-        let status_bar = self.view_status();
+        // Privilege warning banner if active
+        let privilege_banner = self.view_privilege_banner();
 
-        // Main content
+        // Main content for active page
         let content: Element<'_, Message> = match self.current_page {
             Page::Dashboard => views::dashboard::view(self),
             Page::Scan => views::scan::view(self),
@@ -842,8 +1015,28 @@ impl NetSentinelApp {
             Page::Baseline => views::baseline::view(self),
         };
 
-        // Compose layout
-        let layout = column![nav, content, status_bar]
+        // Scrollable view content layout containing the tab navigation and active content
+        let mut main_column = column![self.view_tab_nav()]
+            .spacing(16)
+            .width(Length::Fill)
+            .height(Length::Fill);
+
+        if let Some(banner) = privilege_banner {
+            main_column = main_column.push(banner);
+        }
+
+        main_column = main_column.push(content);
+
+        // Put the main content inside a padding container
+        let main_content = container(main_column)
+            .padding(20)
+            .width(Length::Fill)
+            .height(Length::Fill);
+
+        // Global status bar at bottom
+        let status_bar = self.view_status();
+
+        let layout = column![header, main_content, status_bar]
             .width(Length::Fill)
             .height(Length::Fill);
 
@@ -854,52 +1047,115 @@ impl NetSentinelApp {
             .into()
     }
 
-    /// Render the navigation bar
-    fn view_nav(&self) -> Element<'_, Message> {
-        let mut nav_row = row![].spacing(4).align_y(iced::Alignment::Center);
+    /// Render the global persistent top header
+    fn view_header(&self) -> Element<'_, Message> {
+        let logo = iced::widget::image("assets/netSentinel-logo.png")
+            .width(Length::Fixed(32.0))
+            .height(Length::Fixed(32.0));
 
-        for page in Page::all() {
-            let is_active = self.current_page == *page;
-            let btn = iced::widget::button(
-                text(page.label())
-                    .color(if is_active { TEXT } else { TEXT_MUTED })
-                    .size(14),
-            )
-            .padding([8, 16])
-            .style(if is_active {
-                theme::primary_button
-            } else {
-                theme::secondary_button
-            })
-            .on_press(Message::NavigateTo(page.clone()));
-
-            nav_row = nav_row.push(btn);
-        }
-
-        // Title on the left
         let title = text("NetSentinel")
-            .color(TEXT)
-            .size(18);
+            .color(theme::PRIMARY)
+            .size(20);
 
-        let header = row![
-            title,
+        let header_left = row![logo, title]
+            .spacing(10)
+            .align_y(iced::Alignment::Center);
+
+        let theme_btn = iced::widget::button(
+            text(if self.theme_dark { "🌙" } else { "☀️" })
+                .size(14)
+                .color(theme::TEXT)
+        )
+        .padding([6, 12])
+        .style(theme::secondary_button)
+        .on_press(Message::ToggleTheme);
+
+        let header_row = row![
+            header_left,
             iced::widget::horizontal_space().width(Length::Fill),
-            nav_row,
+            theme_btn,
         ]
         .padding([12, 20])
         .align_y(iced::Alignment::Center)
         .width(Length::Fill);
 
-        container(header)
+        container(header_row)
             .width(Length::Fill)
             .style(theme::header_style)
             .into()
     }
 
+    /// Render the horizontal Tab Navigation bar below the header
+    fn view_tab_nav(&self) -> Element<'_, Message> {
+        let mut tabs_row = row![].spacing(16).align_y(iced::Alignment::Center);
+
+        for page in Page::all() {
+            let is_active = self.current_page == *page;
+            
+            // Stack the button and a bottom indicator line in a column
+            let tab_element = column![
+                iced::widget::button(
+                    text(page.label())
+                        .size(14)
+                )
+                .padding([8, 4])
+                .style(if is_active {
+                    theme::active_tab_button
+                } else {
+                    theme::tab_button
+                })
+                .on_press(Message::NavigateTo(page.clone())),
+                
+                // Active indicator line
+                container(iced::widget::horizontal_space().width(Length::Fill))
+                    .height(2)
+                    .style(move |_theme| {
+                        iced::widget::container::Style {
+                            background: Some(iced::Background::Color(if is_active {
+                                theme::PRIMARY
+                            } else {
+                                iced::Color::TRANSPARENT
+                            })),
+                            ..Default::default()
+                        }
+                    })
+            ]
+            .width(Length::Shrink)
+            .spacing(2);
+
+            tabs_row = tabs_row.push(tab_element);
+        }
+
+        // Draw a horizontal divider line under the tabs row
+        column![
+            tabs_row,
+            container(iced::widget::horizontal_space().width(Length::Fill))
+                .height(1)
+                .style(|_theme| {
+                    iced::widget::container::Style {
+                        background: Some(iced::Background::Color(theme::BORDER_COLOR)),
+                        ..Default::default()
+                    }
+                })
+        ]
+        .width(Length::Fill)
+        .spacing(4)
+        .into()
+    }
+
+    /// Render the privilege warning banner globally if active
+    fn view_privilege_banner(&self) -> Option<Element<'_, Message>> {
+        if let Some(ref caps) = self.platform_caps {
+            widgets::privilege_banner(&caps.warnings).map(|c| c.into())
+        } else {
+            None
+        }
+    }
+
     /// Render the status bar at the bottom
     fn view_status(&self) -> Element<'_, Message> {
         let status_text = if let Some(ref msg) = self.status_message {
-            text(msg.as_str()).color(TEXT_MUTED).size(12)
+            text(msg.as_str()).color(theme::TEXT_MUTED).size(12)
         } else if self.is_scanning {
             text(format!(
                 "Scanning... {} / {} hosts ({}%)",
@@ -907,11 +1163,11 @@ impl NetSentinelApp {
                 self.scan_total,
                 (self.scan_progress * 100.0) as u32
             ))
-            .color(TEXT_MUTED)
+            .color(theme::TEXT_MUTED)
             .size(12)
         } else {
             text("Ready")
-                .color(TEXT_MUTED)
+                .color(theme::TEXT_MUTED)
                 .size(12)
         };
 
@@ -925,7 +1181,7 @@ impl NetSentinelApp {
 
         if self.status_message.is_some() {
             status_row = status_row.push(
-                iced::widget::button(text("Dismiss").color(TEXT_MUTED).size(11))
+                iced::widget::button(text("Dismiss").color(theme::TEXT_MUTED).size(11))
                     .padding([2, 8])
                     .style(theme::secondary_button)
                     .on_press(Message::StatusDismissed),
@@ -1103,6 +1359,16 @@ fn load_baselines() -> Task<Message> {
         },
         Message::BaselinesLoaded,
     )
+}
+
+/// Calculate a /24 CIDR from an IP address
+fn calculate_cidr(ip: &str) -> String {
+    let parts: Vec<&str> = ip.split('.').collect();
+    if parts.len() == 4 {
+        format!("{}.{}.{}.0/24", parts[0], parts[1], parts[2])
+    } else {
+        "192.168.1.0/24".to_string()
+    }
 }
 
 /// Parse a comma-separated port string into a Vec<u16>

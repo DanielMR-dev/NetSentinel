@@ -9,7 +9,7 @@ use crate::ui::{Message, NetSentinelApp};
 
 /// Render the Settings page.
 pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
-    let mut content = column![].spacing(16).padding(20).width(Length::Fill);
+    let mut content = column![].spacing(16).width(Length::Fill);
 
     // ── Profile Manager ─────────────────────────────────────────────────
     let mut profile_list = column![].spacing(4);

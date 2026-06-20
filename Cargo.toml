@@ -35,4 +35,4 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 tokio-native-tls = "0.3"
 native-tls = "0.2"
 x509-parser = "0.16"
-iced = { version = "0.13", features = ["tokio"] }
+iced = { version = "0.13", features = ["tokio", "image"] }

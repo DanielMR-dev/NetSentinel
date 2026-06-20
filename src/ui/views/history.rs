@@ -9,7 +9,7 @@ use crate::ui::{Message, NetSentinelApp};
 
 /// Render the History page.
 pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
-    let mut content = column![].spacing(16).padding(20).width(Length::Fill);
+    let mut content = column![].spacing(16).width(Length::Fill);
 
     // ── Header with controls ────────────────────────────────────────────
     let mut header = row![

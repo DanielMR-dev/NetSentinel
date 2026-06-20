@@ -227,6 +227,85 @@ pub fn success_button(_theme: &Theme, status: iced::widget::button::Status) -> i
     }
 }
 
+/// Flat tab button style (transparent background, text color highlights on hover)
+pub fn tab_button(_theme: &Theme, status: iced::widget::button::Status) -> iced::widget::button::Style {
+    iced::widget::button::Style {
+        background: Some(iced::Background::Color(Color::TRANSPARENT)),
+        text_color: match status {
+            iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed => TEXT,
+            _ => TEXT_MUTED,
+        },
+        border: Border {
+            radius: 0.0.into(),
+            width: 0.0,
+            color: Color::TRANSPARENT,
+        },
+        ..Default::default()
+    }
+}
+
+/// Active tab button style
+pub fn active_tab_button(_theme: &Theme, _status: iced::widget::button::Status) -> iced::widget::button::Style {
+    iced::widget::button::Style {
+        background: Some(iced::Background::Color(Color::TRANSPARENT)),
+        text_color: PRIMARY,
+        border: Border {
+            radius: 0.0.into(),
+            width: 0.0,
+            color: Color::TRANSPARENT,
+        },
+        ..Default::default()
+    }
+}
+
+/// Style for toolbar headers (rounded top corners)
+pub fn toolbar_style(_theme: &Theme) -> iced::widget::container::Style {
+    iced::widget::container::Style {
+        background: Some(iced::Background::Color(HEADER_BG)),
+        border: Border {
+            radius: iced::border::top(8.0),
+            width: 1.0,
+            color: BORDER_COLOR,
+        },
+        text_color: Some(TEXT),
+        ..Default::default()
+    }
+}
+
+/// Style for tables and grids (rounded bottom corners)
+pub fn table_container_style(_theme: &Theme) -> iced::widget::container::Style {
+    iced::widget::container::Style {
+        background: Some(iced::Background::Color(SURFACE)),
+        border: Border {
+            radius: iced::border::bottom(8.0),
+            width: 1.0,
+            color: BORDER_COLOR,
+        },
+        text_color: Some(TEXT),
+        ..Default::default()
+    }
+}
+
+/// Style for CVE warning banner (elevated red warning box)
+pub fn cve_banner_style(_theme: &Theme) -> iced::widget::container::Style {
+    iced::widget::container::Style {
+        background: Some(iced::Background::Color(Color {
+            r: DANGER.r * 0.15,
+            g: DANGER.g * 0.05,
+            b: DANGER.b * 0.05,
+            a: 1.0,
+        })),
+        border: Border {
+            radius: 8.0.into(),
+            width: 1.0,
+            color: DANGER,
+        },
+        text_color: Some(TEXT),
+        ..Default::default()
+    }
+}
+
+
 // ── Helper Functions ────────────────────────────────────────────────────
 
 /// Create a styled card container with padding
@@ -262,4 +341,32 @@ pub fn section_header<'a>(
     iced::widget::text(title)
         .color(TEXT)
         .size(16)
+}
+
+/// Style for terminal/log blocks (dark inset background)
+pub fn terminal_style(_theme: &Theme) -> iced::widget::container::Style {
+    iced::widget::container::Style {
+        background: Some(iced::Background::Color(Color { r: 10.0/255.0, g: 15.0/255.0, b: 25.0/255.0, a: 1.0 })),
+        border: Border {
+            radius: 6.0.into(),
+            width: 1.0,
+            color: BORDER_COLOR,
+        },
+        text_color: Some(TEXT_MUTED),
+        ..Default::default()
+    }
+}
+
+/// Style for the empty state container (subdued background)
+pub fn empty_state_style(_theme: &Theme) -> iced::widget::container::Style {
+    iced::widget::container::Style {
+        background: Some(iced::Background::Color(Color { r: BG.r, g: BG.g, b: BG.b, a: 0.5 })),
+        border: Border {
+            radius: 8.0.into(),
+            width: 1.0,
+            color: BORDER_COLOR,
+        },
+        text_color: Some(TEXT_MUTED),
+        ..Default::default()
+    }
 }

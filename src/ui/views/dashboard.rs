@@ -9,13 +9,66 @@ use crate::ui::{Message, NetSentinelApp};
 
 /// Render the Dashboard page.
 pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
-    let mut content = column![].spacing(16).padding(20).width(Length::Fill);
+    let mut content = column![].spacing(16).width(Length::Fill);
 
-    // ── Privilege Banner ────────────────────────────────────────────────
-    if let Some(ref caps) = app.platform_caps {
-        if let Some(banner) = widgets::privilege_banner(&caps.warnings) {
-            content = content.push(banner);
+    // ── CVE Warning Banner (placed at the top if alerts exist) ──────────
+    if !app.cve_alerts.is_empty() {
+        let unique_hosts: std::collections::HashSet<&str> = app.cve_alerts.iter().map(|a| a.ip.as_str()).collect();
+        let total = app.cve_alerts.len();
+        let host_count = unique_hosts.len();
+
+        let mut critical_count = 0;
+        let mut high_count = 0;
+        let mut medium_count = 0;
+        let mut low_count = 0;
+
+        for alert in &app.cve_alerts {
+            match alert.severity {
+                crate::network::cve::CveSeverity::Critical => critical_count += 1,
+                crate::network::cve::CveSeverity::High => high_count += 1,
+                crate::network::cve::CveSeverity::Medium => medium_count += 1,
+                crate::network::cve::CveSeverity::Low => low_count += 1,
+            }
         }
+
+        let mut severity_row = row![].spacing(16);
+        if critical_count > 0 {
+            severity_row = severity_row.push(text(format!("{} critical", critical_count)).color(theme::DANGER).size(12));
+        }
+        if high_count > 0 {
+            severity_row = severity_row.push(text(format!("{} high", high_count)).color(theme::WARNING).size(12));
+        }
+        if medium_count > 0 {
+            severity_row = severity_row.push(text(format!("{} medium", medium_count)).color(theme::WARNING).size(12));
+        }
+        if low_count > 0 {
+            severity_row = severity_row.push(text(format!("{} low", low_count)).color(theme::INFO).size(12));
+        }
+
+        let banner_text = format!(
+            "{} vulnerabilit{} detected across {} host{}",
+            total,
+            if total == 1 { "y" } else { "ies" },
+            host_count,
+            if host_count == 1 { "" } else { "s" }
+        );
+
+        let banner_col = column![
+            row![
+                text("⚠️").size(16),
+                text(banner_text).color(theme::TEXT).size(14),
+            ].spacing(8).align_y(iced::Alignment::Center),
+            severity_row
+        ]
+        .spacing(6)
+        .width(Length::Fill);
+
+        let cve_banner = container(banner_col)
+            .padding(14)
+            .width(Length::Fill)
+            .style(theme::cve_banner_style);
+
+        content = content.push(cve_banner);
     }
 
     // ── System Info Card ────────────────────────────────────────────────
@@ -53,42 +106,6 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         .width(Length::Fill);
 
     content = content.push(info_row);
-
-    // ── CVE Summary Card ────────────────────────────────────────────────
-    let cve_count = app.cve_alerts.len();
-    let critical_count = app
-        .cve_alerts
-        .iter()
-        .filter(|c| matches!(c.severity, crate::network::cve::CveSeverity::Critical))
-        .count();
-    let high_count = app
-        .cve_alerts
-        .iter()
-        .filter(|c| matches!(c.severity, crate::network::cve::CveSeverity::High))
-        .count();
-
-    let cve_content = if cve_count == 0 {
-        column![text("No CVE alerts").color(TEXT_MUTED).size(13)]
-    } else {
-        column![
-            row![
-                text(format!("Total: {}", cve_count)).color(TEXT).size(13),
-                iced::widget::horizontal_space().width(Length::Fixed(16.0)),
-                text(format!("Critical: {}", critical_count))
-                    .color(crate::ui::theme::DANGER)
-                    .size(13),
-                iced::widget::horizontal_space().width(Length::Fixed(16.0)),
-                text(format!("High: {}", high_count))
-                    .color(crate::ui::theme::WARNING)
-                    .size(13),
-            ]
-            .spacing(0),
-        ]
-        .spacing(6)
-    };
-
-    let cve_card = widgets::card(Some("CVE Summary"), cve_content);
-    content = content.push(cve_card);
 
     // ── Discovered Devices Card ─────────────────────────────────────────
     let device_count = app.discovered_devices.len();
