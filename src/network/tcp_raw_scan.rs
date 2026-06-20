@@ -1,9 +1,7 @@
 //! Stealth TCP SYN scanning engine.
 //!
-//! Implements half-open SYN scanning using raw packet injection via `pnet`.
-//! This method sends SYN packets and listens for SYN-ACK responses without
-//! completing the TCP handshake, making it faster and stealthier than
-//! TCP connect scanning.
+//! Implements raw packet injection via `pnet` for TCP scans.
+//! Supports SYN, FIN, XMAS, and NULL scanning methods.
 //!
 //! # Requirements
 //! - Root/Administrator privileges or CAP_NET_RAW on Linux
@@ -27,7 +25,7 @@ use pnet::util::MacAddr;
 use crate::error::ScanError;
 use crate::network::platform;
 use crate::network::timing::TimingController;
-use crate::types::{Port, PortState};
+use crate::types::{Port, PortState, ScanType};
 
 /// Size of the TCP header (20 bytes, no options)
 const TCP_HEADER_SIZE: usize = 20;
@@ -44,8 +42,10 @@ const SYN_PACKET_SIZE: usize = ETHERNET_HEADER_SIZE + IPV4_HEADER_SIZE + TCP_HEA
 /// Receive buffer size
 const RECV_BUF_SIZE: usize = 65535;
 
-/// SYN scanner that performs stealth TCP scanning via raw packets.
-pub struct SynScanner {
+/// Raw TCP scanner that performs stealth scanning via raw packets.
+pub struct RawTcpScanner {
+    /// Scan type
+    scan_type: ScanType,
     /// Source IPv4 address
     src_ip: Ipv4Addr,
     /// Network interface to use
@@ -56,8 +56,8 @@ pub struct SynScanner {
     gateway_mac: MacAddr,
 }
 
-impl SynScanner {
-    /// Create a new SYN scanner.
+impl RawTcpScanner {
+    /// Create a new raw TCP scanner.
     ///
     /// Automatically detects the appropriate network interface and
     /// resolves the gateway MAC address.
@@ -65,7 +65,7 @@ impl SynScanner {
     /// # Errors
     /// Returns `ScanError::PermissionDenied` if raw socket access is unavailable.
     /// Returns `ScanError::NetworkError` if no suitable interface is found.
-    pub fn new(src_ip: Ipv4Addr) -> Result<Self, ScanError> {
+    pub fn new(src_ip: Ipv4Addr, scan_type: ScanType) -> Result<Self, ScanError> {
         let interfaces = datalink::interfaces();
 
         // Find the interface that has our source IP
@@ -91,6 +91,7 @@ impl SynScanner {
         let gateway_mac = MacAddr::broadcast();
 
         Ok(Self {
+            scan_type,
             src_ip,
             interface,
             src_mac,
@@ -98,8 +99,8 @@ impl SynScanner {
         })
     }
 
-    /// Create a new SYN scanner resolved automatically for target_ip.
-    pub async fn new_for_target(target_ip: Ipv4Addr) -> Result<Self, ScanError> {
+    /// Create a new raw TCP scanner resolved automatically for target_ip.
+    pub async fn new_for_target(target_ip: Ipv4Addr, scan_type: ScanType) -> Result<Self, ScanError> {
         let (interface, src_ip) = Self::resolve_interface_and_ip(target_ip)
             .await
             .ok_or_else(|| {
@@ -113,6 +114,7 @@ impl SynScanner {
         let gateway_mac = MacAddr::broadcast();
 
         Ok(Self {
+            scan_type,
             src_ip,
             interface,
             src_mac,
@@ -178,8 +180,8 @@ impl SynScanner {
         None
     }
 
-    /// Craft a TCP SYN packet for the given target.
-    fn craft_syn_packet(
+    /// Craft a raw TCP packet for the given target with appropriate flags.
+    fn craft_tcp_packet(
         &self,
         dst_ip: Ipv4Addr,
         src_port: u16,
@@ -222,7 +224,7 @@ impl SynScanner {
             ipv4.set_checksum(checksum);
         }
 
-        // TCP header (SYN)
+        // TCP header
         {
             let mut tcp = MutableTcpPacket::new(
                 &mut buffer[ETHERNET_HEADER_SIZE + IPV4_HEADER_SIZE..],
@@ -234,7 +236,16 @@ impl SynScanner {
             tcp.set_sequence(rand_port() as u32 * 1000);
             tcp.set_acknowledgement(0);
             tcp.set_data_offset(5);
-            tcp.set_flags(TcpFlags::SYN);
+
+            let flags = match self.scan_type {
+                ScanType::Syn => TcpFlags::SYN,
+                ScanType::Fin => TcpFlags::FIN,
+                ScanType::Xmas => TcpFlags::FIN | TcpFlags::PSH | TcpFlags::URG,
+                ScanType::Null => 0,
+                _ => TcpFlags::SYN,
+            };
+            tcp.set_flags(flags);
+
             tcp.set_window(1024);
             tcp.set_urgent_ptr(0);
 
@@ -340,11 +351,11 @@ impl SynScanner {
             ))
         })?;
 
-        // Craft and send SYN packet
-        let syn_packet = self.craft_syn_packet(target_ip, src_port, target_port);
+        // Craft and send TCP packet
+        let tcp_packet = self.craft_tcp_packet(target_ip, src_port, target_port);
 
         // For raw IP sockets, we skip the Ethernet header and let the kernel handle routing
-        let ip_packet = &syn_packet[ETHERNET_HEADER_SIZE..];
+        let ip_packet = &tcp_packet[ETHERNET_HEADER_SIZE..];
 
         let dest = std::net::SocketAddrV4::new(target_ip, 0);
         send_socket
@@ -379,7 +390,11 @@ impl SynScanner {
 
         loop {
             if Instant::now() >= deadline {
-                return Ok((PortState::Filtered, None));
+                if matches!(self.scan_type, ScanType::Syn) {
+                    return Ok((PortState::Filtered, None));
+                } else {
+                    return Ok((PortState::Open, None)); // Timeout for FIN/XMAS/NULL generally implies Open|Filtered
+                }
             }
 
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -422,8 +437,8 @@ impl SynScanner {
 
                             let flags = tcp.get_flags();
 
-                            // SYN-ACK received → port is open
-                            if flags & TcpFlags::SYN != 0 && flags & TcpFlags::ACK != 0 {
+                            // SYN-ACK received → port is open (for SYN scan)
+                            if matches!(self.scan_type, ScanType::Syn) && flags & TcpFlags::SYN != 0 && flags & TcpFlags::ACK != 0 {
                                 // Send RST to abort the handshake
                                 let rst_packet = self.craft_rst_packet(
                                     target_ip,
@@ -440,7 +455,7 @@ impl SynScanner {
                                 return Ok((PortState::Open, Some(ipv4.get_ttl())));
                             }
 
-                            // RST received → port is closed
+                            // RST received → port is closed (for SYN, FIN, XMAS, NULL)
                             if flags & TcpFlags::RST != 0 {
                                 return Ok((PortState::Closed, Some(ipv4.get_ttl())));
                             }
@@ -450,7 +465,11 @@ impl SynScanner {
                 Err(e) => {
                     match e.kind() {
                         std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
-                            return Ok((PortState::Filtered, None));
+                            if matches!(self.scan_type, ScanType::Syn) {
+                                return Ok((PortState::Filtered, None));
+                            } else {
+                                return Ok((PortState::Open, None)); // Open|Filtered
+                            }
                         }
                         _ => {
                             return Err(ScanError::NetworkError(format!(
@@ -484,6 +503,7 @@ impl SynScanner {
                 let scanner_iface_name = self.interface.name.clone();
                 let scanner_src_mac = self.src_mac;
                 let scanner_gw_mac = self.gateway_mac;
+                let scanner_type = self.scan_type.clone();
                 let timing_clone = timing.semaphore();
 
                 async move {
@@ -495,7 +515,8 @@ impl SynScanner {
 
                     // Spawn blocking SYN scan
                     let result = tokio::task::spawn_blocking(move || {
-                        let scanner = SynScanner {
+                        let scanner = RawTcpScanner {
+                            scan_type: scanner_type,
                             src_ip: scanner_ip,
                             interface: datalink::interfaces()
                                 .into_iter()
@@ -552,7 +573,7 @@ impl SynScanner {
 }
 
 /// Generate a random port number for use as source port.
-fn rand_port() -> u16 {
+pub fn rand_port() -> u16 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     use std::time::SystemTime;
@@ -582,7 +603,7 @@ mod tests {
     #[test]
     fn test_syn_scanner_creation_no_panic() {
         // This may fail if no suitable interface is found, but should never panic
-        let result = SynScanner::new(Ipv4Addr::new(127, 0, 0, 1));
+        let result = RawTcpScanner::new(Ipv4Addr::new(127, 0, 0, 1), ScanType::Syn);
         // On most systems, 127.0.0.1 is on loopback which we skip
         assert!(result.is_ok() || result.is_err());
     }

@@ -10,8 +10,16 @@ pub enum ScanType {
     Connect,
     /// Stealth SYN scan (requires raw socket privileges)
     Syn,
-    /// UDP port scan (no special privileges needed)
+    /// TCP FIN scan
+    Fin,
+    /// TCP XMAS scan
+    Xmas,
+    /// TCP NULL scan
+    Null,
+    /// UDP port scan (no special privileges needed for basic, raw socket for full)
     Udp,
+    /// SCTP INIT scan
+    Sctp,
 }
 
 impl Default for ScanType {
@@ -23,7 +31,15 @@ impl Default for ScanType {
 impl ScanType {
     /// Return all scan types available in the UI.
     pub fn all_types() -> &'static [ScanType] {
-        &[ScanType::Connect, ScanType::Syn, ScanType::Udp]
+        &[
+            ScanType::Connect,
+            ScanType::Syn,
+            ScanType::Fin,
+            ScanType::Xmas,
+            ScanType::Null,
+            ScanType::Udp,
+            ScanType::Sctp,
+        ]
     }
 }
 
@@ -32,7 +48,11 @@ impl std::fmt::Display for ScanType {
         match self {
             ScanType::Connect => write!(f, "Connect"),
             ScanType::Syn => write!(f, "SYN"),
+            ScanType::Fin => write!(f, "FIN"),
+            ScanType::Xmas => write!(f, "XMAS"),
+            ScanType::Null => write!(f, "NULL"),
             ScanType::Udp => write!(f, "UDP"),
+            ScanType::Sctp => write!(f, "SCTP"),
         }
     }
 }
@@ -297,9 +317,25 @@ mod tests {
         let json = serde_json::to_string(&ScanType::Syn).unwrap();
         assert_eq!(json, "\"syn\"");
 
+        // Fin
+        let json = serde_json::to_string(&ScanType::Fin).unwrap();
+        assert_eq!(json, "\"fin\"");
+
+        // Xmas
+        let json = serde_json::to_string(&ScanType::Xmas).unwrap();
+        assert_eq!(json, "\"xmas\"");
+
+        // Null
+        let json = serde_json::to_string(&ScanType::Null).unwrap();
+        assert_eq!(json, "\"null\"");
+
         // Udp
         let json = serde_json::to_string(&ScanType::Udp).unwrap();
         assert_eq!(json, "\"udp\"");
+
+        // Sctp
+        let json = serde_json::to_string(&ScanType::Sctp).unwrap();
+        assert_eq!(json, "\"sctp\"");
     }
 
     #[test]

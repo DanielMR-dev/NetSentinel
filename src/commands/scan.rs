@@ -45,25 +45,8 @@ pub async fn start_scan(
         sanitize::validate_ports(&ports)?;
     }
 
-    let effective_scan_type = scan_type.unwrap_or_default();
+    let mut effective_scan_type = scan_type.unwrap_or_default();
     let effective_timing = timing_template.unwrap_or_default();
-
-    // If SYN scan requested, verify privileges
-    if effective_scan_type == ScanType::Syn {
-        let priv_status = tokio::task::spawn_blocking(
-            crate::network::privileges::check_system_privileges,
-        )
-        .await
-        .map_err(|e| ScanError::NetworkError(format!("Privilege check failed: {}", e)))?;
-
-        if !priv_status.syn_scan_available {
-            return Err(ScanError::PermissionDenied(
-                "SYN scanning requires raw socket privileges (root/CAP_NET_RAW/Administrator). \
-                Please use TCP Connect scan or run with elevated privileges"
-                .to_string(),
-            ));
-        }
-    }
 
     // Helper closure to send log events
     let send_log = |level: &str, message: &str, target: Option<&str>| {
@@ -74,6 +57,24 @@ pub async fn start_scan(
             timestamp: chrono::Utc::now().timestamp(),
         });
     };
+
+    // If SYN scan requested, verify privileges
+    if effective_scan_type == ScanType::Syn {
+        let priv_status = tokio::task::spawn_blocking(
+            crate::network::privileges::check_system_privileges,
+        )
+        .await
+        .map_err(|e| ScanError::NetworkError(format!("Privilege check failed: {}", e)))?;
+
+        if !priv_status.syn_scan_available {
+            send_log(
+                "warn",
+                "Insufficient privileges for SYN scan (requires root/Administrator/CAP_NET_RAW). Downgrading to TCP Connect scan.",
+                None,
+            );
+            effective_scan_type = ScanType::Connect;
+        }
+    }
 
     send_log("info", &format!("Validating CIDR: {}", cidr), None);
 
@@ -128,6 +129,7 @@ pub async fn start_scan(
     let event_tx_clone = event_tx.clone();
     let scan_id_clone = scan_id.clone();
     let _cidr_clone = cidr.clone();
+    let scan_type_for_thread = effective_scan_type.clone();
 
     tokio::spawn(async move {
         let start_time = Instant::now();
@@ -148,7 +150,71 @@ pub async fn start_scan(
         let duration_ms = start_time.elapsed().as_millis() as u64;
 
         match discovery_result {
-            Ok(devices) => {
+            Ok(mut devices) => {
+                // Perform Port Scanning if requested
+                if scan_ports && !ports.is_empty() && !devices.is_empty() {
+                    let timing_controller = crate::network::timing::TimingController::new(effective_timing.clone());
+                    
+                    for device in devices.iter_mut() {
+                        if !state_clone.is_running() { break; }
+                        
+                        let ip_addr = match device.ip.parse::<std::net::Ipv4Addr>() {
+                            Ok(ip) => ip,
+                            Err(_) => continue, // Ignore IPv6 for raw scans currently
+                        };
+                        
+                        let (mut scanned_ports, detected_ttl) = match scan_type_for_thread {
+                            ScanType::Syn | ScanType::Fin | ScanType::Xmas | ScanType::Null => {
+                                if let Ok(scanner) = crate::network::tcp_raw_scan::RawTcpScanner::new_for_target(ip_addr, scan_type_for_thread.clone()).await {
+                                    scanner.scan_ports(ip_addr, &ports, &timing_controller).await
+                                } else {
+                                    (vec![], None)
+                                }
+                            },
+                            ScanType::Udp => {
+                                if let Ok(scanner) = crate::network::udp_raw_scan::UdpRawScanner::new_for_target(ip_addr).await {
+                                    scanner.scan_ports(ip_addr, &ports, &timing_controller).await
+                                } else {
+                                    (vec![], None)
+                                }
+                            },
+                            ScanType::Sctp => {
+                                if let Ok(scanner) = crate::network::sctp_scan::SctpScanner::new_for_target(ip_addr).await {
+                                    scanner.scan_ports(ip_addr, &ports, &timing_controller).await
+                                } else {
+                                    (vec![], None)
+                                }
+                            },
+                            ScanType::Connect => {
+                                let ip: std::net::IpAddr = ip_addr.into();
+                                let timeout_ms = timing_controller.connection_timeout().as_millis() as u64;
+                                let connect_ports = crate::network::host_discovery::scan_ports(ip, &ports, timeout_ms).await;
+                                (connect_ports, None)
+                            }
+                        };
+                        
+                        // Perform service detection on Open ports
+                        let detector = crate::network::service_detection::ServiceDetector::new(
+                            std::time::Duration::from_millis(timing_controller.connection_timeout().as_millis() as u64 * 2)
+                        );
+                        
+                        for port in scanned_ports.iter_mut() {
+                            if port.state == crate::types::PortState::Open && port.protocol == "tcp" {
+                                if let Ok(info) = detector.detect_tcp(&device.ip, port.number).await {
+                                    if let Some(srv) = info.service {
+                                        port.service = Some(srv);
+                                    }
+                                }
+                            }
+                        }
+                        
+                        device.ports = scanned_ports;
+                        if let Some(ttl) = detected_ttl {
+                            device.os = Some(format!("TTL: {}", ttl));
+                        }
+                    }
+                }
+
                 let device_count = devices.len() as u32;
 
                 // Store devices in shared state
