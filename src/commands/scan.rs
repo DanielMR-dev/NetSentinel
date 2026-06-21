@@ -36,6 +36,8 @@ pub async fn start_scan(
     retry_count: Option<u8>,
     scan_type: Option<ScanType>,
     timing_template: Option<TimingTemplate>,
+    web_audit_profile: Option<crate::network::web_audit::WebAuditProfile>,
+    run_active_checks: Option<bool>,
 ) -> Result<ScanResponse, ScanError> {
     // --- Input Validation ---
     let _validated_cidr = sanitize::validate_cidr(&cidr)?;
@@ -245,9 +247,29 @@ pub async fn start_scan(
                             }
                         }
                         
-                        device.ports = scanned_ports;
+                        device.ports = scanned_ports.clone();
                         if let Some(ttl) = detected_ttl {
                             device.os = Some(format!("TTL: {}", ttl));
+                        }
+                        
+                        // Run Web Audits
+                        if let Some(profile) = web_audit_profile {
+                            let mut audits = Vec::new();
+                            for port in &scanned_ports {
+                                if port.state == crate::types::PortState::Open && (port.number == 80 || port.number == 443 || port.number == 8080 || port.number == 8443) {
+                                    let is_https = port.number == 443 || port.number == 8443;
+                                    if let Ok(res) = crate::network::web_audit::audit_web_service(&device.ip, port.number, is_https, profile).await {
+                                        audits.push(res);
+                                    }
+                                }
+                            }
+                            device.web_audits = audits;
+                        }
+                        
+                        // Run Active Checks
+                        if run_active_checks.unwrap_or(false) {
+                            let open_ports: Vec<u16> = scanned_ports.iter().filter(|p| p.state == crate::types::PortState::Open).map(|p| p.number).collect();
+                            device.active_checks = crate::network::active_checks::run_active_checks(&device.ip, &open_ports).await;
                         }
                     }
                 }

@@ -498,6 +498,8 @@ impl NetSentinelApp {
                             Some(retry),
                             Some(scan_type),
                             None,
+                            Some(crate::network::web_audit::WebAuditProfile::Safe),
+                            Some(true),
                         )
                         .await
                         .map(|r| r.scan_id)

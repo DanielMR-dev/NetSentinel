@@ -17,3 +17,5 @@ pub mod udp_scan;
 pub mod service_detection;
 pub mod ipv6_discovery;
 pub mod mdns_netbios;
+pub mod web_audit;
+pub mod active_checks;

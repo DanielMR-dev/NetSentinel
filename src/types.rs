@@ -130,6 +130,10 @@ pub struct Device {
     pub last_seen: i64,
     /// Banner grab results for this device
     pub banner_results: Vec<BannerResult>,
+    /// Active critical vulnerability checks for this device
+    pub active_checks: Vec<crate::network::active_checks::ActiveCheckResult>,
+    /// Web auditing results for HTTP/HTTPS services found on this device
+    pub web_audits: Vec<crate::network::web_audit::WebAuditResult>,
 }
 
 impl Device {
@@ -144,6 +148,8 @@ impl Device {
             ports: Vec::new(),
             last_seen: chrono::Utc::now().timestamp(),
             banner_results: Vec::new(),
+            active_checks: Vec::new(),
+            web_audits: Vec::new(),
         }
     }
 
