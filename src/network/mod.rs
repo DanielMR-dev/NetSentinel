@@ -15,3 +15,5 @@ pub mod tls;
 pub mod udp_raw_scan;
 pub mod udp_scan;
 pub mod service_detection;
+pub mod ipv6_discovery;
+pub mod mdns_netbios;

@@ -137,8 +137,8 @@ pub async fn start_scan(
         // Parse IPs from CIDR
         let ips: Vec<IpAddr> = network.iter().map(|ip| IpAddr::from(ip)).collect();
 
-        // Run host discovery
-        let discovery_result = host_discovery::discover_hosts(
+        // Run IPv4 host discovery
+        let mut discovery_result = host_discovery::discover_hosts(
             ips,
             event_tx_clone.clone(),
             cancel_rx,
@@ -146,6 +146,43 @@ pub async fn start_scan(
             effective_retry_count as u32,
         )
         .await;
+        
+        // Extend with NetBIOS if requested (and if we have IPv4 targets)
+        if _use_arp {
+            let ipv4 = network.ip();
+            let bcast = std::net::Ipv4Addr::new(ipv4.octets()[0], ipv4.octets()[1], ipv4.octets()[2], 255);
+            if let Ok(nbns_devs) = crate::network::mdns_netbios::discover_netbios(bcast).await {
+                    if let Ok(ref mut devs) = discovery_result {
+                        for d in nbns_devs {
+                            if !devs.iter().any(|existing| existing.ip == d.ip) {
+                                devs.push(d);
+                            }
+                        }
+                    }
+            }
+            
+            // Extend with mDNS
+            if let Ok(mdns_devs) = crate::network::mdns_netbios::discover_mdns().await {
+                if let Ok(ref mut devs) = discovery_result {
+                    for d in mdns_devs {
+                        if !devs.iter().any(|existing| existing.ip == d.ip) {
+                            devs.push(d);
+                        }
+                    }
+                }
+            }
+            
+            // Extend with IPv6
+            if let Ok(ipv6_devs) = crate::network::ipv6_discovery::discover_ipv6_hosts(event_tx_clone.clone()).await {
+                if let Ok(ref mut devs) = discovery_result {
+                    for d in ipv6_devs {
+                        if !devs.iter().any(|existing| existing.ip == d.ip) {
+                            devs.push(d);
+                        }
+                    }
+                }
+            }
+        }
 
         let duration_ms = start_time.elapsed().as_millis() as u64;
 
