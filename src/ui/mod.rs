@@ -164,6 +164,8 @@ pub enum Message {
     // Export
     ExportCsv,
     ExportJson,
+    ExportHtml,
+    ExportPdf,
     ExportCompleted(Result<bool, String>),
 
     // Search / Filter / Sort / Theme
@@ -1010,6 +1012,48 @@ impl NetSentinelApp {
                         crate::commands::export_audit_report("json".to_string(), devices)
                             .await
                             .map_err(|e| e.to_string())
+                    },
+                    Message::ExportCompleted,
+                )
+            }
+
+            Message::ExportHtml => {
+                let devices = self.discovered_devices.clone();
+                Task::perform(
+                    async move {
+                        if let Some(path) = rfd::AsyncFileDialog::new()
+                            .add_filter("HTML Document", &["html"])
+                            .set_file_name("netsentinel_report.html")
+                            .save_file()
+                            .await
+                        {
+                            crate::reporting::export::generate_html_report(&devices, path.path())
+                                .map(|_| true)
+                                .map_err(|e| e.to_string())
+                        } else {
+                            Ok(false)
+                        }
+                    },
+                    Message::ExportCompleted,
+                )
+            }
+
+            Message::ExportPdf => {
+                let devices = self.discovered_devices.clone();
+                Task::perform(
+                    async move {
+                        if let Some(path) = rfd::AsyncFileDialog::new()
+                            .add_filter("PDF Document", &["pdf"])
+                            .set_file_name("netsentinel_report.pdf")
+                            .save_file()
+                            .await
+                        {
+                            crate::reporting::export::generate_pdf_report(&devices, path.path())
+                                .map(|_| true)
+                                .map_err(|e| e.to_string())
+                        } else {
+                            Ok(false)
+                        }
                     },
                     Message::ExportCompleted,
                 )

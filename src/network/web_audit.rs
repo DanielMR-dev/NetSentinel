@@ -2,7 +2,6 @@
 //!
 //! Provides "Safe/Passive" and "Aggressive" auditing for discovered HTTP/HTTPS services.
 
-use std::collections::HashMap;
 use std::time::Duration;
 
 use reqwest::{Client, redirect::Policy};
