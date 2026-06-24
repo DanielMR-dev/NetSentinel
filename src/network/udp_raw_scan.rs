@@ -7,10 +7,10 @@ use std::time::{Duration, Instant};
 
 use pnet::datalink::{self, NetworkInterface};
 use pnet::packet::ethernet::{EtherTypes, MutableEthernetPacket};
+use pnet::packet::icmp::{IcmpCode, IcmpPacket, IcmpTypes};
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::{Ipv4Packet, MutableIpv4Packet};
 use pnet::packet::udp::{ipv4_checksum, MutableUdpPacket, UdpPacket};
-use pnet::packet::icmp::{IcmpPacket, IcmpTypes, IcmpCode};
 use pnet::util::MacAddr;
 
 use crate::error::ScanError;
@@ -32,14 +32,15 @@ pub struct UdpRawScanner {
 
 impl UdpRawScanner {
     pub async fn new_for_target(target_ip: Ipv4Addr) -> Result<Self, ScanError> {
-        let (interface, src_ip) = crate::network::tcp_raw_scan::RawTcpScanner::resolve_interface_and_ip(target_ip)
-            .await
-            .ok_or_else(|| {
-                ScanError::NetworkError(format!(
-                    "Failed to resolve network interface for target {}",
-                    target_ip
-                ))
-            })?;
+        let (interface, src_ip) =
+            crate::network::tcp_raw_scan::RawTcpScanner::resolve_interface_and_ip(target_ip)
+                .await
+                .ok_or_else(|| {
+                    ScanError::NetworkError(format!(
+                        "Failed to resolve network interface for target {}",
+                        target_ip
+                    ))
+                })?;
 
         let src_mac = interface.mac.unwrap_or(MacAddr::zero());
         let gateway_mac = MacAddr::broadcast();
@@ -58,7 +59,7 @@ impl UdpRawScanner {
         dst_ip: Ipv4Addr,
         src_port: u16,
         dst_port: u16,
-    ) -> Vec<u8> {
+    ) -> Result<Vec<u8>, ScanError> {
         // Some UDP services respond better to specific payloads. For basic UDP scan, we send empty payload.
         let payload: &[u8] = match dst_port {
             53 => b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07version\x04bind\x00\x00\x10\x00\x03", // DNS Version.bind request
@@ -71,7 +72,10 @@ impl UdpRawScanner {
 
         // Ethernet header
         {
-            let mut eth = MutableEthernetPacket::new(&mut buffer[..ETHERNET_HEADER_SIZE]).unwrap();
+            let mut eth = MutableEthernetPacket::new(&mut buffer[..ETHERNET_HEADER_SIZE])
+                .ok_or_else(|| {
+                    ScanError::PacketError("Buffer too small for Ethernet header".to_string())
+                })?;
             eth.set_destination(self.gateway_mac);
             eth.set_source(self.src_mac);
             eth.set_ethertype(EtherTypes::Ipv4);
@@ -81,7 +85,10 @@ impl UdpRawScanner {
         {
             let mut ipv4 = MutableIpv4Packet::new(
                 &mut buffer[ETHERNET_HEADER_SIZE..ETHERNET_HEADER_SIZE + IPV4_HEADER_SIZE],
-            ).unwrap();
+            )
+            .ok_or_else(|| {
+                ScanError::PacketError("Buffer too small for IPv4 header".to_string())
+            })?;
             ipv4.set_version(4);
             ipv4.set_header_length(5);
             ipv4.set_total_length((IPV4_HEADER_SIZE + UDP_HEADER_SIZE + payload.len()) as u16);
@@ -92,26 +99,28 @@ impl UdpRawScanner {
             ipv4.set_next_level_protocol(IpNextHeaderProtocols::Udp);
             ipv4.set_source(self.src_ip);
             ipv4.set_destination(dst_ip);
-            
+
             let checksum = pnet::packet::ipv4::checksum(&ipv4.to_immutable());
             ipv4.set_checksum(checksum);
         }
 
         // UDP header
         {
-            let mut udp = MutableUdpPacket::new(
-                &mut buffer[ETHERNET_HEADER_SIZE + IPV4_HEADER_SIZE..],
-            ).unwrap();
+            let mut udp =
+                MutableUdpPacket::new(&mut buffer[ETHERNET_HEADER_SIZE + IPV4_HEADER_SIZE..])
+                    .ok_or_else(|| {
+                        ScanError::PacketError("Buffer too small for UDP header".to_string())
+                    })?;
             udp.set_source(src_port);
             udp.set_destination(dst_port);
             udp.set_length((UDP_HEADER_SIZE + payload.len()) as u16);
             udp.set_payload(payload);
-            
+
             let checksum = ipv4_checksum(&udp.to_immutable(), &self.src_ip, &dst_ip);
             udp.set_checksum(checksum);
         }
 
-        buffer
+        Ok(buffer)
     }
 
     pub fn scan_port_blocking(
@@ -127,17 +136,18 @@ impl UdpRawScanner {
             socket2::Domain::IPV4,
             socket2::Type::RAW,
             Some(socket2::Protocol::UDP),
-        ).map_err(|e| {
+        )
+        .map_err(|e| {
             ScanError::PermissionDenied(format!("Cannot create raw socket for UDP scan: {}", e))
         })?;
 
-        let packet = self.craft_udp_packet(target_ip, src_port, target_port);
+        let packet = self.craft_udp_packet(target_ip, src_port, target_port)?;
         let ip_packet = &packet[ETHERNET_HEADER_SIZE..];
 
         let dest = std::net::SocketAddrV4::new(target_ip, 0);
-        send_socket.send_to(ip_packet, &socket2::SockAddr::from(dest)).map_err(|e| {
-            ScanError::NetworkError(format!("Failed to send UDP packet: {}", e))
-        })?;
+        send_socket
+            .send_to(ip_packet, &socket2::SockAddr::from(dest))
+            .map_err(|e| ScanError::NetworkError(format!("Failed to send UDP packet: {}", e)))?;
 
         // We need to listen to both ICMP (for Port Unreachable) and UDP (for application response)
         // Wait, socket2 RAW IPPROTO_ICMP will receive ICMP packets.
@@ -145,22 +155,37 @@ impl UdpRawScanner {
         // It's tricky to poll two raw sockets in a blocking loop simultaneously.
         // We can create an ICMP raw socket, but receiving UDP on a raw socket might only get packets meant for us.
         // Actually, UDP ports can be polled using standard UdpSocket or RAW UDP socket with a small timeout in a loop.
-        
+
         let icmp_socket = socket2::Socket::new(
             socket2::Domain::IPV4,
             socket2::Type::RAW,
             Some(socket2::Protocol::ICMPV4),
-        ).map_err(|e| ScanError::NetworkError(format!("Failed to create ICMP receive socket: {}", e)))?;
-        icmp_socket.set_read_timeout(Some(Duration::from_millis(50))).unwrap();
+        )
+        .map_err(|e| {
+            ScanError::NetworkError(format!("Failed to create ICMP receive socket: {}", e))
+        })?;
+        icmp_socket
+            .set_read_timeout(Some(Duration::from_millis(50)))
+            .map_err(|e| {
+                ScanError::NetworkError(format!("Failed to set ICMP receive timeout: {}", e))
+            })?;
 
         let udp_socket = socket2::Socket::new(
             socket2::Domain::IPV4,
             socket2::Type::RAW,
             Some(socket2::Protocol::UDP),
-        ).map_err(|e| ScanError::NetworkError(format!("Failed to create UDP receive socket: {}", e)))?;
-        udp_socket.set_read_timeout(Some(Duration::from_millis(50))).unwrap();
+        )
+        .map_err(|e| {
+            ScanError::NetworkError(format!("Failed to create UDP receive socket: {}", e))
+        })?;
+        udp_socket
+            .set_read_timeout(Some(Duration::from_millis(50)))
+            .map_err(|e| {
+                ScanError::NetworkError(format!("Failed to set UDP receive timeout: {}", e))
+            })?;
 
-        let mut recv_buf: Vec<std::mem::MaybeUninit<u8>> = vec![std::mem::MaybeUninit::uninit(); RECV_BUF_SIZE];
+        let mut recv_buf: Vec<std::mem::MaybeUninit<u8>> =
+            vec![std::mem::MaybeUninit::uninit(); RECV_BUF_SIZE];
         let deadline = Instant::now() + timeout;
 
         loop {
@@ -171,6 +196,14 @@ impl UdpRawScanner {
 
             // Check ICMP
             if let Ok(size) = icmp_socket.recv(&mut recv_buf) {
+                // Defensive validation before the unsafe slice construction.
+                if size > recv_buf.len() {
+                    continue;
+                }
+
+                // SAFETY: `recv` returned `Ok(size)`, so the first `size` bytes of
+                // `recv_buf` have been initialized by the kernel. We verified that
+                // `size <= recv_buf.len()`, so the slice is in bounds.
                 let recv_bytes = unsafe { std::slice::from_raw_parts(recv_buf[0].as_ptr(), size) };
                 if let Some(ipv4) = Ipv4Packet::new(recv_bytes) {
                     if ipv4.get_source() == target_ip {
@@ -180,7 +213,8 @@ impl UdpRawScanner {
                                 // Destination Unreachable (Type 3)
                                 if icmp.get_icmp_type() == IcmpTypes::DestinationUnreachable {
                                     let code = icmp.get_icmp_code();
-                                    if code == IcmpCode::new(3) { // Port Unreachable
+                                    if code == IcmpCode::new(3) {
+                                        // Port Unreachable
                                         // Technically we should check the embedded IP header inside the ICMP payload
                                         // to make sure it matches our sent packet, but matching the target_ip and Type 3 Code 3
                                         // is usually sufficient for a simple scan.
@@ -198,13 +232,25 @@ impl UdpRawScanner {
 
             // Check UDP
             if let Ok(size) = udp_socket.recv(&mut recv_buf) {
+                // Defensive validation before the unsafe slice construction.
+                if size > recv_buf.len() {
+                    continue;
+                }
+
+                // SAFETY: `recv` returned `Ok(size)`, so the first `size` bytes of
+                // `recv_buf` have been initialized by the kernel. We verified that
+                // `size <= recv_buf.len()`, so the slice is in bounds.
                 let recv_bytes = unsafe { std::slice::from_raw_parts(recv_buf[0].as_ptr(), size) };
                 if let Some(ipv4) = Ipv4Packet::new(recv_bytes) {
-                    if ipv4.get_source() == target_ip && ipv4.get_next_level_protocol() == IpNextHeaderProtocols::Udp {
+                    if ipv4.get_source() == target_ip
+                        && ipv4.get_next_level_protocol() == IpNextHeaderProtocols::Udp
+                    {
                         let ip_header_len = (ipv4.get_header_length() as usize) * 4;
                         if size >= ip_header_len + 8 {
                             if let Some(udp) = UdpPacket::new(&recv_bytes[ip_header_len..size]) {
-                                if udp.get_source() == target_port && udp.get_destination() == src_port {
+                                if udp.get_source() == target_port
+                                    && udp.get_destination() == src_port
+                                {
                                     // Received a UDP response!
                                     return Ok((PortState::Open, Some(ipv4.get_ttl())));
                                 }
@@ -238,32 +284,55 @@ impl UdpRawScanner {
                     timing.apply_delay().await;
 
                     let result = tokio::task::spawn_blocking(move || {
+                        let interface = datalink::interfaces()
+                            .into_iter()
+                            .find(|i| i.name == scanner_iface_name)
+                            .ok_or_else(|| {
+                                ScanError::NoInterfaceForIp(scanner_iface_name.clone())
+                            })?;
+
                         let scanner = UdpRawScanner {
                             src_ip: scanner_ip,
-                            interface: datalink::interfaces().into_iter().find(|i| i.name == scanner_iface_name).unwrap(),
+                            interface,
                             src_mac: scanner_src_mac,
                             gateway_mac: scanner_gw_mac,
                         };
                         scanner.scan_port_blocking(target_ip, port, timeout)
-                    }).await;
+                    })
+                    .await;
 
                     let (state, ttl) = match result {
                         Ok(Ok((state, ttl))) => (state, ttl),
-                        _ => (PortState::Filtered, None),
+                        Ok(Err(e)) => {
+                            tracing::warn!("UDP raw scan failed for {}:{}: {}", target_ip, port, e);
+                            (PortState::Filtered, None)
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "UDP raw scan task panicked for {}:{}: {}",
+                                target_ip,
+                                port,
+                                e
+                            );
+                            (PortState::Filtered, None)
+                        }
                     };
 
                     (port, state, ttl)
                 }
             })
             .buffer_unordered(timing.max_concurrent().min(ports.len().max(1)))
-            .collect().await;
+            .collect()
+            .await;
 
         let mut detected_ttl = None;
         let scanned_ports: Vec<Port> = results
             .into_iter()
             .map(|(port, state, ttl)| {
                 if let Some(t) = ttl {
-                    if detected_ttl.is_none() { detected_ttl = Some(t); }
+                    if detected_ttl.is_none() {
+                        detected_ttl = Some(t);
+                    }
                 }
                 Port {
                     number: port,

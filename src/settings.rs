@@ -1,7 +1,7 @@
 //! Settings management module for NetSentinel
 //!
- //! This module provides settings profiles, scan configuration, and UI preferences
- //! that can be saved and loaded from disk.
+//! This module provides settings profiles, scan configuration, and UI preferences
+//! that can be saved and loaded from disk.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -211,20 +211,20 @@ impl SettingsManager {
     /// Save all profiles to disk
     pub async fn save_profiles(&self, container: &ProfilesContainer) -> Result<(), ScanError> {
         // Ensure directory exists
-        fs::create_dir_all(&self.config_dir)
-            .await
-            .map_err(|e| ScanError::NetworkError(format!("Failed to create config directory: {}", e)))?;
+        fs::create_dir_all(&self.config_dir).await.map_err(|e| {
+            ScanError::NetworkError(format!("Failed to create config directory: {}", e))
+        })?;
 
         let json = serde_json::to_string_pretty(container)
             .map_err(|e| ScanError::NetworkError(format!("Failed to serialize profiles: {}", e)))?;
 
-        let mut file = fs::File::create(&self.profiles_path())
-            .await
-            .map_err(|e| ScanError::NetworkError(format!("Failed to create profiles file: {}", e)))?;
+        let mut file = fs::File::create(&self.profiles_path()).await.map_err(|e| {
+            ScanError::NetworkError(format!("Failed to create profiles file: {}", e))
+        })?;
 
-        file.write_all(json.as_bytes())
-            .await
-            .map_err(|e| ScanError::NetworkError(format!("Failed to write profiles file: {}", e)))?;
+        file.write_all(json.as_bytes()).await.map_err(|e| {
+            ScanError::NetworkError(format!("Failed to write profiles file: {}", e))
+        })?;
 
         Ok(())
     }
@@ -238,36 +238,40 @@ impl SettingsManager {
             return Ok(SettingsProfile::default_profile());
         }
 
-        let mut file = fs::File::open(&path)
-            .await
-            .map_err(|e| ScanError::NetworkError(format!("Failed to open current settings file: {}", e)))?;
+        let mut file = fs::File::open(&path).await.map_err(|e| {
+            ScanError::NetworkError(format!("Failed to open current settings file: {}", e))
+        })?;
 
         let mut contents = String::new();
-        file.read_to_string(&mut contents)
-            .await
-            .map_err(|e| ScanError::NetworkError(format!("Failed to read current settings: {}", e)))?;
+        file.read_to_string(&mut contents).await.map_err(|e| {
+            ScanError::NetworkError(format!("Failed to read current settings: {}", e))
+        })?;
 
-        serde_json::from_str(&contents)
-            .map_err(|e| ScanError::InvalidInput(format!("Failed to parse current settings: {}", e)))
+        serde_json::from_str(&contents).map_err(|e| {
+            ScanError::InvalidInput(format!("Failed to parse current settings: {}", e))
+        })
     }
 
     /// Save the current active settings
     pub async fn save_current_settings(&self, profile: &SettingsProfile) -> Result<(), ScanError> {
         // Ensure directory exists
-        fs::create_dir_all(&self.config_dir)
-            .await
-            .map_err(|e| ScanError::NetworkError(format!("Failed to create config directory: {}", e)))?;
+        fs::create_dir_all(&self.config_dir).await.map_err(|e| {
+            ScanError::NetworkError(format!("Failed to create config directory: {}", e))
+        })?;
 
-        let json = serde_json::to_string_pretty(profile)
-            .map_err(|e| ScanError::NetworkError(format!("Failed to serialize current settings: {}", e)))?;
+        let json = serde_json::to_string_pretty(profile).map_err(|e| {
+            ScanError::NetworkError(format!("Failed to serialize current settings: {}", e))
+        })?;
 
         let mut file = fs::File::create(&self.current_settings_path())
             .await
-            .map_err(|e| ScanError::NetworkError(format!("Failed to create current settings file: {}", e)))?;
+            .map_err(|e| {
+                ScanError::NetworkError(format!("Failed to create current settings file: {}", e))
+            })?;
 
-        file.write_all(json.as_bytes())
-            .await
-            .map_err(|e| ScanError::NetworkError(format!("Failed to write current settings: {}", e)))?;
+        file.write_all(json.as_bytes()).await.map_err(|e| {
+            ScanError::NetworkError(format!("Failed to write current settings: {}", e))
+        })?;
 
         Ok(())
     }
@@ -328,15 +332,15 @@ mod serialization_tests {
     #[test]
     fn test_profile_serialization_roundtrip() {
         let profile = SettingsProfile::default_profile();
-        
+
         // Serialize to JSON
         let json = serde_json::to_string(&profile).unwrap();
         println!("Serialized profile: {}", json);
-        
+
         // Deserialize back
         let deserialized: SettingsProfile = serde_json::from_str(&json).unwrap();
         println!("Deserialized profile: name={}", deserialized.name);
-        
+
         assert_eq!(profile.name, deserialized.name);
         assert_eq!(profile.id, deserialized.id);
         assert_eq!(profile.is_default, deserialized.is_default);
@@ -346,18 +350,23 @@ mod serialization_tests {
     fn test_profiles_container_serialization_roundtrip() {
         let mut container = ProfilesContainer::new();
         let profile = SettingsProfile::default_profile();
-        container.profiles.insert(profile.id.clone(), profile.clone());
+        container
+            .profiles
+            .insert(profile.id.clone(), profile.clone());
         container.default_profile_id = Some(profile.id.clone());
         container.active_profile_id = Some(profile.id.clone());
-        
+
         // Serialize to JSON
         let json = serde_json::to_string_pretty(&container).unwrap();
         println!("Container JSON:\n{}", json);
-        
+
         // Deserialize back
         let deserialized: ProfilesContainer = serde_json::from_str(&json).unwrap();
         assert_eq!(container.profiles.len(), deserialized.profiles.len());
-        assert_eq!(container.default_profile_id, deserialized.default_profile_id);
+        assert_eq!(
+            container.default_profile_id,
+            deserialized.default_profile_id
+        );
         assert_eq!(container.active_profile_id, deserialized.active_profile_id);
     }
 
@@ -367,14 +376,18 @@ mod serialization_tests {
         let profile1 = SettingsProfile::default_profile();
         let mut profile2 = SettingsProfile::new("Test".to_string());
         profile2.is_default = false;
-        
-        container.profiles.insert(profile1.id.clone(), profile1.clone());
-        container.profiles.insert(profile2.id.clone(), profile2.clone());
-        
+
+        container
+            .profiles
+            .insert(profile1.id.clone(), profile1.clone());
+        container
+            .profiles
+            .insert(profile2.id.clone(), profile2.clone());
+
         let profiles: Vec<SettingsProfile> = container.profiles.into_values().collect();
         let json = serde_json::to_string_pretty(&profiles).unwrap();
         println!("Profiles array JSON:\n{}", json);
-        
+
         assert_eq!(profiles.len(), 2);
     }
 }

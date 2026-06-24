@@ -76,9 +76,8 @@ impl HistoryStore {
             return Ok(Vec::new());
         }
 
-        let mut entries: Vec<ScanHistoryEntry> = serde_json::from_str(&content).map_err(|e| {
-            ScanError::HistoryError(format!("Failed to parse history JSON: {}", e))
-        })?;
+        let mut entries: Vec<ScanHistoryEntry> = serde_json::from_str(&content)
+            .map_err(|e| ScanError::HistoryError(format!("Failed to parse history JSON: {}", e)))?;
 
         // Sort by timestamp descending (newest first)
         entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
@@ -202,6 +201,8 @@ mod tests {
                 ports: Vec::new(),
                 last_seen: timestamp,
                 banner_results: Vec::new(),
+                active_checks: Vec::new(),
+                web_audits: Vec::new(),
             }],
             timestamp,
         }
@@ -227,7 +228,10 @@ mod tests {
         let store = make_store(tmp.path());
 
         let entry = make_entry("entry-1", 1000);
-        store.add_entry(entry).await.expect("add_entry should succeed");
+        store
+            .add_entry(entry)
+            .await
+            .expect("add_entry should succeed");
 
         let loaded = store.load().await.expect("load should succeed");
         assert_eq!(loaded.len(), 1);
@@ -243,18 +247,9 @@ mod tests {
         let tmp = tempfile::tempdir().expect("create tempdir");
         let store = make_store(tmp.path());
 
-        store
-            .add_entry(make_entry("a", 1000))
-            .await
-            .expect("add a");
-        store
-            .add_entry(make_entry("b", 2000))
-            .await
-            .expect("add b");
-        store
-            .add_entry(make_entry("c", 3000))
-            .await
-            .expect("add c");
+        store.add_entry(make_entry("a", 1000)).await.expect("add a");
+        store.add_entry(make_entry("b", 2000)).await.expect("add b");
+        store.add_entry(make_entry("c", 3000)).await.expect("add c");
 
         store.delete_entry("b").await.expect("delete b");
 
@@ -268,10 +263,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("create tempdir");
         let store = make_store(tmp.path());
 
-        store
-            .add_entry(make_entry("a", 1000))
-            .await
-            .expect("add a");
+        store.add_entry(make_entry("a", 1000)).await.expect("add a");
 
         let result = store.delete_entry("nonexistent").await;
         assert!(result.is_err(), "Should error on nonexistent entry");
@@ -282,14 +274,8 @@ mod tests {
         let tmp = tempfile::tempdir().expect("create tempdir");
         let store = make_store(tmp.path());
 
-        store
-            .add_entry(make_entry("a", 1000))
-            .await
-            .expect("add a");
-        store
-            .add_entry(make_entry("b", 2000))
-            .await
-            .expect("add b");
+        store.add_entry(make_entry("a", 1000)).await.expect("add a");
+        store.add_entry(make_entry("b", 2000)).await.expect("add b");
 
         store.clear().await.expect("clear");
 
@@ -360,7 +346,10 @@ mod tests {
 
         // Verify camelCase field names
         assert!(json.contains("\"scanId\""), "Should contain scanId");
-        assert!(json.contains("\"deviceCount\""), "Should contain deviceCount");
+        assert!(
+            json.contains("\"deviceCount\""),
+            "Should contain deviceCount"
+        );
         assert!(json.contains("\"durationMs\""), "Should contain durationMs");
 
         // Verify snake_case is NOT present

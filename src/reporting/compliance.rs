@@ -48,14 +48,15 @@ impl ComplianceEngine {
 
             // CIS Checks
             if port.number == 22 {
-                // If SSH is found, we'd normally check version. For heuristic, flag if it's very old, 
+                // If SSH is found, we'd normally check version. For heuristic, flag if it's very old,
                 // but since we only have the banner string here, we do a simple check.
                 if let Some(banner) = port.service.as_ref() {
                     if banner.contains("SSH-1.") {
                         issues.push(ComplianceIssue {
                             framework: "CIS".to_string(),
                             rule: "Disable SSH v1".to_string(),
-                            description: "SSH protocol version 1 is outdated and vulnerable.".to_string(),
+                            description: "SSH protocol version 1 is outdated and vulnerable."
+                                .to_string(),
                             severity: "High".to_string(),
                         });
                     }

@@ -3,28 +3,50 @@
 //! Provides structures to calculate CVSS v3.1 Base Scores from metrics
 //! and fetches Exploit Prediction Scoring System (EPSS) probabilities.
 
-use std::collections::HashMap;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
 use lazy_static::lazy_static;
 use reqwest::Client;
 use serde::Deserialize;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tracing::warn;
 
 // --- CVSS v3.1 Base Score Calculator ---
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum AttackVector { Network, Adjacent, Local, Physical }
+pub enum AttackVector {
+    Network,
+    Adjacent,
+    Local,
+    Physical,
+}
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum AttackComplexity { Low, High }
+pub enum AttackComplexity {
+    Low,
+    High,
+}
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum PrivilegesRequired { None, Low, High }
+pub enum PrivilegesRequired {
+    None,
+    Low,
+    High,
+}
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum UserInteraction { None, Required }
+pub enum UserInteraction {
+    None,
+    Required,
+}
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Scope { Unchanged, Changed }
+pub enum Scope {
+    Unchanged,
+    Changed,
+}
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum CiaImpact { None, Low, High } // Confidentiality, Integrity, Availability
+pub enum CiaImpact {
+    None,
+    Low,
+    High,
+} // Confidentiality, Integrity, Availability
 
 pub struct Cvss31Metrics {
     pub attack_vector: AttackVector,
@@ -38,10 +60,6 @@ pub struct Cvss31Metrics {
 }
 
 impl Cvss31Metrics {
-    fn round_up(n: f64) -> f64 {
-        (n * 100000.0).round() / 100000.0
-    }
-
     fn round_up_1(n: f64) -> f64 {
         let int_input = (n * 100000.0).round() as i64;
         if int_input % 10000 == 0 {
@@ -76,9 +94,21 @@ impl Cvss31Metrics {
 
         let exp = 8.22 * av * ac * pr * ui;
 
-        let conf = match self.confidentiality { CiaImpact::High => 0.56, CiaImpact::Low => 0.22, CiaImpact::None => 0.0 };
-        let integ = match self.integrity { CiaImpact::High => 0.56, CiaImpact::Low => 0.22, CiaImpact::None => 0.0 };
-        let avail = match self.availability { CiaImpact::High => 0.56, CiaImpact::Low => 0.22, CiaImpact::None => 0.0 };
+        let conf = match self.confidentiality {
+            CiaImpact::High => 0.56,
+            CiaImpact::Low => 0.22,
+            CiaImpact::None => 0.0,
+        };
+        let integ = match self.integrity {
+            CiaImpact::High => 0.56,
+            CiaImpact::Low => 0.22,
+            CiaImpact::None => 0.0,
+        };
+        let avail = match self.availability {
+            CiaImpact::High => 0.56,
+            CiaImpact::Low => 0.22,
+            CiaImpact::None => 0.0,
+        };
 
         let iss = 1.0 - ((1.0 - conf) * (1.0 - integ) * (1.0 - avail));
 
@@ -121,7 +151,8 @@ pub struct EpssScore {
 }
 
 lazy_static! {
-    static ref EPSS_CACHE: Mutex<HashMap<String, (EpssScore, Instant)>> = Mutex::new(HashMap::new());
+    static ref EPSS_CACHE: Mutex<HashMap<String, (EpssScore, Instant)>> =
+        Mutex::new(HashMap::new());
 }
 
 pub async fn get_epss_score(cve_id: &str) -> Option<EpssScore> {
@@ -149,16 +180,25 @@ pub async fn get_epss_score(cve_id: &str) -> Option<EpssScore> {
                     if let Some(item) = epss_resp.data.first() {
                         let prob = item.epss.parse::<f64>().unwrap_or(0.0);
                         let perc = item.percentile.parse::<f64>().unwrap_or(0.0);
-                        
-                        let score = EpssScore { probability: prob, percentile: perc };
-                        
+
+                        let score = EpssScore {
+                            probability: prob,
+                            percentile: perc,
+                        };
+
                         if let Ok(mut cache) = EPSS_CACHE.lock() {
-                            cache.insert(cve_id.to_string(), (
-                                EpssScore { probability: prob, percentile: perc },
-                                Instant::now()
-                            ));
+                            cache.insert(
+                                cve_id.to_string(),
+                                (
+                                    EpssScore {
+                                        probability: prob,
+                                        percentile: perc,
+                                    },
+                                    Instant::now(),
+                                ),
+                            );
                         }
-                        
+
                         return Some(score);
                     }
                 }

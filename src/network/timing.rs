@@ -203,8 +203,14 @@ mod tests {
 
     #[test]
     fn test_timing_template_connection_timeouts() {
-        assert!(TimingTemplate::Paranoid.connection_timeout() > TimingTemplate::Normal.connection_timeout());
-        assert!(TimingTemplate::Normal.connection_timeout() > TimingTemplate::Insane.connection_timeout());
+        assert!(
+            TimingTemplate::Paranoid.connection_timeout()
+                > TimingTemplate::Normal.connection_timeout()
+        );
+        assert!(
+            TimingTemplate::Normal.connection_timeout()
+                > TimingTemplate::Insane.connection_timeout()
+        );
     }
 
     #[test]

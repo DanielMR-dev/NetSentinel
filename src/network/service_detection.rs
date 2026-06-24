@@ -2,13 +2,13 @@
 
 use std::time::Duration;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 
-use nmap_parser::{ProbeDatabase, Probe};
 use crate::error::ScanError;
+use nmap_parser::{Probe, ProbeDatabase};
 
 #[derive(Debug, Clone)]
 pub struct ServiceInfo {
@@ -22,7 +22,13 @@ pub struct ServiceInfo {
 
 static PROBE_DB: Lazy<ProbeDatabase> = Lazy::new(|| {
     let bytes = include_bytes!(concat!(env!("OUT_DIR"), "/nmap_probes.bin"));
-    bincode::deserialize(bytes).expect("Failed to deserialize nmap probes database")
+    match bincode::deserialize(bytes) {
+        Ok(db) => db,
+        Err(e) => {
+            tracing::error!("Failed to deserialize nmap probes database: {}. Service detection will be unavailable.", e);
+            ProbeDatabase::default()
+        }
+    }
 });
 
 pub struct ServiceDetector {
@@ -36,13 +42,13 @@ impl ServiceDetector {
 
     pub async fn detect_tcp(&self, ip: &str, port: u16) -> Result<ServiceInfo, ScanError> {
         let addr = format!("{}:{}", ip, port);
-        
+
         // Find applicable probes
         // 1. NULL probe
         // 2. Probes where 'ports' includes this port
-        
+
         let null_probe = PROBE_DB.probes.iter().find(|p| p.name == "NULL");
-        
+
         // Try NULL probe first
         if let Some(probe) = null_probe {
             if let Ok(info) = self.execute_probe(&addr, probe, port).await {
@@ -51,14 +57,20 @@ impl ServiceDetector {
                 }
             }
         }
-        
+
         // Try specific probes for this port
         for probe in PROBE_DB.probes.iter() {
-            if probe.name == "NULL" || probe.protocol != "TCP" { continue; }
-            
+            if probe.name == "NULL" || probe.protocol != "TCP" {
+                continue;
+            }
+
             // Simple check if this port is targeted
-            let targets_port = probe.ports.as_ref().map(|p_str| p_str.contains(&port.to_string())).unwrap_or(false);
-            
+            let targets_port = probe
+                .ports
+                .as_ref()
+                .map(|p_str| p_str.contains(&port.to_string()))
+                .unwrap_or(false);
+
             if targets_port {
                 if let Ok(info) = self.execute_probe(&addr, probe, port).await {
                     if info.service.is_some() {
@@ -79,7 +91,12 @@ impl ServiceDetector {
         })
     }
 
-    async fn execute_probe(&self, addr: &str, probe: &Probe, _port: u16) -> Result<ServiceInfo, ScanError> {
+    async fn execute_probe(
+        &self,
+        addr: &str,
+        probe: &Probe,
+        _port: u16,
+    ) -> Result<ServiceInfo, ScanError> {
         let connect_result = tokio::time::timeout(self.timeout, TcpStream::connect(addr)).await;
         let mut stream = match connect_result {
             Ok(Ok(s)) => s,
@@ -87,7 +104,10 @@ impl ServiceDetector {
         };
 
         if !probe.probe_string.is_empty() {
-            if tokio::time::timeout(self.timeout, stream.write_all(&probe.probe_string)).await.is_err() {
+            if tokio::time::timeout(self.timeout, stream.write_all(&probe.probe_string))
+                .await
+                .is_err()
+            {
                 return Err(ScanError::Timeout);
             }
         }
@@ -116,7 +136,7 @@ impl ServiceDetector {
 
                     // Extract version info fields (v/version/ p/product/ o/os/ etc)
                     let vinfo = &m.versioninfo;
-                    
+
                     // Simple extraction of v/ and o/ and cpe:/a:
                     // Using basic string parsing since the format is space-separated or bounded by /
                     if let Some(v_start) = vinfo.find("v/") {

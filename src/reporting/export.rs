@@ -6,19 +6,30 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
-use printpdf::*;
-use html_escape::encode_text;
 use chrono::Utc;
+use html_escape::encode_text;
+use printpdf::*;
 
-use crate::types::Device;
 use crate::reporting::compliance::ComplianceEngine;
+use crate::types::Device;
 
 /// Generates a self-contained HTML report for the scan.
-pub fn generate_html_report(devices: &[Device], filepath: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn generate_html_report(
+    devices: &[Device],
+    filepath: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut file = File::create(filepath)?;
 
     let total_devices = devices.len();
-    let open_ports: usize = devices.iter().map(|d| d.ports.iter().filter(|p| p.state == crate::types::PortState::Open).count()).sum();
+    let open_ports: usize = devices
+        .iter()
+        .map(|d| {
+            d.ports
+                .iter()
+                .filter(|p| p.state == crate::types::PortState::Open)
+                .count()
+        })
+        .sum();
 
     let mut html = String::new();
     html.push_str("<!DOCTYPE html>\n<html>\n<head>\n");
@@ -36,7 +47,10 @@ pub fn generate_html_report(devices: &[Device], filepath: &Path) -> Result<(), B
     html.push_str("</head>\n<body>\n");
 
     html.push_str(&format!("<h1>NetSentinel Audit Report</h1>\n"));
-    html.push_str(&format!("<p>Generated on {}</p>\n", Utc::now().to_rfc2822()));
+    html.push_str(&format!(
+        "<p>Generated on {}</p>\n",
+        Utc::now().to_rfc2822()
+    ));
 
     html.push_str("<div class='card'>\n");
     html.push_str("<h2>Summary</h2>\n");
@@ -47,7 +61,7 @@ pub fn generate_html_report(devices: &[Device], filepath: &Path) -> Result<(), B
     for device in devices {
         html.push_str("<div class='card'>\n");
         html.push_str(&format!("<h3>Host: {}</h3>\n", encode_text(&device.ip)));
-        
+
         if !device.mac.is_empty() {
             html.push_str(&format!("<p>MAC: {}</p>\n", encode_text(&device.mac)));
         }
@@ -59,7 +73,11 @@ pub fn generate_html_report(devices: &[Device], filepath: &Path) -> Result<(), B
             for port in &device.ports {
                 if port.state == crate::types::PortState::Open {
                     let service = port.service.as_deref().unwrap_or("Unknown");
-                    html.push_str(&format!("<tr><td>{}</td><td>{}</td></tr>\n", port.number, encode_text(service)));
+                    html.push_str(&format!(
+                        "<tr><td>{}</td><td>{}</td></tr>\n",
+                        port.number,
+                        encode_text(service)
+                    ));
                 }
             }
             html.push_str("</table>\n");
@@ -69,12 +87,15 @@ pub fn generate_html_report(devices: &[Device], filepath: &Path) -> Result<(), B
         let issues = ComplianceEngine::audit_device(device);
         if !issues.is_empty() {
             html.push_str("<h4>Compliance Issues</h4>\n");
-            html.push_str("<table><tr><th>Framework</th><th>Severity</th><th>Description</th></tr>\n");
+            html.push_str(
+                "<table><tr><th>Framework</th><th>Severity</th><th>Description</th></tr>\n",
+            );
             for issue in issues {
-                html.push_str(&format!("<tr><td>{}</td><td class='severity-{}'>{}</td><td>{}</td></tr>\n", 
-                    encode_text(&issue.framework), 
-                    encode_text(&issue.severity), 
-                    encode_text(&issue.severity), 
+                html.push_str(&format!(
+                    "<tr><td>{}</td><td class='severity-{}'>{}</td><td>{}</td></tr>\n",
+                    encode_text(&issue.framework),
+                    encode_text(&issue.severity),
+                    encode_text(&issue.severity),
                     encode_text(&issue.description)
                 ));
             }
@@ -91,36 +112,64 @@ pub fn generate_html_report(devices: &[Device], filepath: &Path) -> Result<(), B
 }
 
 /// Generates a PDF report using printpdf.
-pub fn generate_pdf_report(devices: &[Device], filepath: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let (doc, page1, layer1) = PdfDocument::new("NetSentinel Audit Report", Mm(210.0), Mm(297.0), "Layer 1");
+pub fn generate_pdf_report(
+    devices: &[Device],
+    filepath: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (doc, page1, layer1) =
+        PdfDocument::new("NetSentinel Audit Report", Mm(210.0), Mm(297.0), "Layer 1");
     let current_layer = doc.get_page(page1).get_layer(layer1);
 
     // Set font (Built-in Helvetica)
     let font = doc.add_builtin_font(BuiltinFont::Helvetica)?;
 
     current_layer.use_text("NetSentinel Audit Report", 24.0, Mm(20.0), Mm(270.0), &font);
-    
+
     let generated_text = format!("Generated on {}", Utc::now().to_rfc2822());
     current_layer.use_text(generated_text, 12.0, Mm(20.0), Mm(260.0), &font);
 
     let mut y_pos = 240.0;
 
-    current_layer.use_text(format!("Total Devices Scanned: {}", devices.len()), 14.0, Mm(20.0), Mm(y_pos), &font);
+    current_layer.use_text(
+        format!("Total Devices Scanned: {}", devices.len()),
+        14.0,
+        Mm(20.0),
+        Mm(y_pos),
+        &font,
+    );
     y_pos -= 10.0;
 
     for device in devices {
         if y_pos < 30.0 {
             // Very basic pagination: if we run out of room, just stop for now in this MVP
-            current_layer.use_text("... (report truncated due to length)", 10.0, Mm(20.0), Mm(y_pos), &font);
+            current_layer.use_text(
+                "... (report truncated due to length)",
+                10.0,
+                Mm(20.0),
+                Mm(y_pos),
+                &font,
+            );
             break;
         }
 
-        current_layer.use_text(format!("Host: {}", device.ip), 12.0, Mm(25.0), Mm(y_pos), &font);
+        current_layer.use_text(
+            format!("Host: {}", device.ip),
+            12.0,
+            Mm(25.0),
+            Mm(y_pos),
+            &font,
+        );
         y_pos -= 8.0;
-        
+
         let issues = ComplianceEngine::audit_device(device);
         if !issues.is_empty() {
-            current_layer.use_text(format!("  {} compliance issues found.", issues.len()), 10.0, Mm(30.0), Mm(y_pos), &font);
+            current_layer.use_text(
+                format!("  {} compliance issues found.", issues.len()),
+                10.0,
+                Mm(30.0),
+                Mm(y_pos),
+                &font,
+            );
             y_pos -= 6.0;
         }
     }

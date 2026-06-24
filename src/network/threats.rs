@@ -3,12 +3,12 @@
 //! Analyzes incoming ARP traffic to detect multiple MAC addresses claiming
 //! the same IP, and specifically monitors the default gateway.
 
+use pnet::util::MacAddr;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::time::SystemTime;
-use pnet::util::MacAddr;
-use tracing::{warn, info};
-use serde::{Serialize, Deserialize};
+use tracing::{info, warn};
 
 /// Represents a detected threat
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,7 +44,11 @@ impl ArpMonitor {
             .as_secs();
 
         // Avoid tracking all-zero or broadcast MACs/IPs as typical senders
-        if sender_mac == MacAddr::zero() || sender_mac == MacAddr::broadcast() || sender_ip.is_unspecified() || sender_ip.is_broadcast() {
+        if sender_mac == MacAddr::zero()
+            || sender_mac == MacAddr::broadcast()
+            || sender_ip.is_unspecified()
+            || sender_ip.is_broadcast()
+        {
             return None;
         }
 
@@ -52,18 +56,29 @@ impl ArpMonitor {
             if *existing_mac != sender_mac {
                 // MAC address changed for this IP!
                 let is_gateway = self.gateway_ip == Some(sender_ip);
-                
+
                 let alert = ThreatAlert {
-                    threat_type: if is_gateway { "GATEWAY_ARP_SPOOFING".to_string() } else { "ARP_SPOOFING".to_string() },
+                    threat_type: if is_gateway {
+                        "GATEWAY_ARP_SPOOFING".to_string()
+                    } else {
+                        "ARP_SPOOFING".to_string()
+                    },
                     description: format!(
                         "IP {} was previously seen with MAC {}, but is now claimed by MAC {}.",
                         sender_ip, existing_mac, sender_mac
                     ),
-                    severity: if is_gateway { "CRITICAL".to_string() } else { "HIGH".to_string() },
+                    severity: if is_gateway {
+                        "CRITICAL".to_string()
+                    } else {
+                        "HIGH".to_string()
+                    },
                     timestamp: now,
                 };
 
-                warn!("Threat Detected: {} - {}", alert.threat_type, alert.description);
+                warn!(
+                    "Threat Detected: {} - {}",
+                    alert.threat_type, alert.description
+                );
 
                 // Update the mapping to the new MAC so we don't alert continuously on the exact same spoofing state
                 self.ip_to_mac.insert(sender_ip, (sender_mac, now));
@@ -76,7 +91,7 @@ impl ArpMonitor {
         } else {
             // First time seeing this IP
             self.ip_to_mac.insert(sender_ip, (sender_mac, now));
-            
+
             if self.gateway_ip == Some(sender_ip) {
                 info!("Gateway MAC locked in: {} -> {}", sender_ip, sender_mac);
             }

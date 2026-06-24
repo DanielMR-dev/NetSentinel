@@ -16,9 +16,7 @@ pub async fn check_privilege_status() -> Result<PrivilegeStatus, ScanError> {
     // so we use spawn_blocking to avoid blocking the async runtime.
     let status = tokio::task::spawn_blocking(privileges::check_system_privileges)
         .await
-        .map_err(|e| {
-            ScanError::NetworkError(format!("Privilege check task failed: {}", e))
-        })?;
+        .map_err(|e| ScanError::NetworkError(format!("Privilege check task failed: {}", e)))?;
 
     Ok(status)
 }

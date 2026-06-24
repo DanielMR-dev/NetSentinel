@@ -5,8 +5,8 @@
 
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use pnet::datalink;
@@ -36,7 +36,7 @@ pub struct NetFlow {
     pub last_seen: u64,
 }
 
-/// A key for unique flows (ignoring directionality for simplicity, or keeping it unidirectional. 
+/// A key for unique flows (ignoring directionality for simplicity, or keeping it unidirectional.
 /// We'll use unidirectional here for simplicity: A->B is a different flow than B->A).
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
 struct FlowKey {
@@ -101,37 +101,50 @@ fn flush_to_sqlite(
 ) {
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
 
     let mut to_remove = Vec::new();
 
-    let tx = conn.transaction().unwrap();
+    let tx = match conn.transaction() {
+        Ok(tx) => tx,
+        Err(e) => {
+            error!("Capture Thread: Failed to begin SQLite transaction: {}", e);
+            return;
+        }
+    };
 
     for (key, flow) in flows.iter() {
         // Flush if forced (app closing), or if flow hasn't been seen in 60 seconds
-        if flush_all || (now - flow.last_seen > 60) {
-            let _ = tx.execute(
+        if flush_all || (now.saturating_sub(flow.last_seen) > 60) {
+            if let Err(e) = tx.execute(
                 "INSERT INTO flows (src_ip, dst_ip, src_port, dst_port, protocol, bytes, packets, first_seen, last_seen)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     flow.src_ip, flow.dst_ip, flow.src_port, flow.dst_port, flow.protocol,
                     flow.bytes, flow.packets, flow.first_seen, flow.last_seen
                 ]
-            );
+            ) {
+                warn!("Capture Thread: Failed to insert flow: {}", e);
+            }
             to_remove.push(key.clone());
         }
     }
 
     // Write alerts
     for alert in alerts.drain(..) {
-        let _ = tx.execute(
+        if let Err(e) = tx.execute(
             "INSERT INTO alerts (threat_type, description, severity, timestamp) VALUES (?1, ?2, ?3, ?4)",
             params![alert.threat_type, alert.description, alert.severity, alert.timestamp]
-        );
+        ) {
+            warn!("Capture Thread: Failed to insert alert: {}", e);
+        }
     }
 
-    let _ = tx.commit();
+    if let Err(e) = tx.commit() {
+        error!("Capture Thread: Failed to commit SQLite transaction: {}", e);
+        return;
+    }
 
     for key in to_remove {
         flows.remove(&key);
@@ -145,10 +158,13 @@ pub fn spawn_capture_thread(
 ) {
     std::thread::spawn(move || {
         let interfaces = datalink::interfaces();
-        // Automatically pick a non-loopback interface that is UP. 
+        // Automatically pick a non-loopback interface that is UP.
         // In a real scenario we'd use routing tables to find the default route,
         // but checking `is_up` and `!is_loopback` works for 90% of cases.
-        let iface = match interfaces.into_iter().find(|i| i.is_up() && !i.is_loopback() && !i.ips.is_empty()) {
+        let iface = match interfaces
+            .into_iter()
+            .find(|i| i.is_up() && !i.is_loopback() && !i.ips.is_empty())
+        {
             Some(i) => i,
             None => {
                 error!("Capture Thread: No suitable network interface found.");
@@ -156,7 +172,10 @@ pub fn spawn_capture_thread(
             }
         };
 
-        info!("Starting background packet capture on interface: {}", iface.name);
+        info!(
+            "Starting background packet capture on interface: {}",
+            iface.name
+        );
 
         let mut rx = match datalink::channel(&iface, Default::default()) {
             Ok(datalink::Channel::Ethernet(_, rx)) => rx,
@@ -246,7 +265,10 @@ pub fn spawn_capture_thread(
                             }
                             EtherTypes::Arp => {
                                 if let Some(arp) = ArpPacket::new(ethernet.payload()) {
-                                    if let Some(alert) = arp_monitor.observe_arp(arp.get_sender_proto_addr(), arp.get_sender_hw_addr()) {
+                                    if let Some(alert) = arp_monitor.observe_arp(
+                                        arp.get_sender_proto_addr(),
+                                        arp.get_sender_hw_addr(),
+                                    ) {
                                         pending_alerts.push(alert);
                                     }
                                 }

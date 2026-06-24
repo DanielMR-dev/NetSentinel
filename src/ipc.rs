@@ -38,7 +38,11 @@ impl NexusIntercom for NexusIntercomImpl {
                         nexus_ipc::ipc_message::Payload::HostDiscovered(host) => {
                             // Strict IP sanitization
                             if host.ip_address.parse::<IpAddr>().is_err() {
-                                let _ = tx.send(Err(Status::invalid_argument("Invalid IP address format"))).await;
+                                let _ = tx
+                                    .send(Err(Status::invalid_argument(
+                                        "Invalid IP address format",
+                                    )))
+                                    .await;
                                 continue;
                             }
 
@@ -48,20 +52,28 @@ impl NexusIntercom for NexusIntercomImpl {
                             if !host.os_guess.is_empty() {
                                 device.os = Some(host.os_guess);
                             }
-                            device.ports = host.open_ports.into_iter().map(|p| {
-                                Port {
+                            device.ports = host
+                                .open_ports
+                                .into_iter()
+                                .map(|p| Port {
                                     number: p as u16,
                                     protocol: "tcp".to_string(),
                                     service: crate::types::get_service_name(p as u16),
                                     state: crate::types::PortState::Open,
-                                }
-                            }).collect();
+                                })
+                                .collect();
 
                             let event = AppEvent::DeviceFound(device);
-                            
+
                             // Backpressure check using try_send on the bounded channel
-                            if let Err(mpsc::error::TrySendError::Full(_)) = event_tx.try_send(event) {
-                                let _ = tx.send(Err(Status::resource_exhausted("NetSentinel event queue is full"))).await;
+                            if let Err(mpsc::error::TrySendError::Full(_)) =
+                                event_tx.try_send(event)
+                            {
+                                let _ = tx
+                                    .send(Err(Status::resource_exhausted(
+                                        "NetSentinel event queue is full",
+                                    )))
+                                    .await;
                             }
                         }
                         nexus_ipc::ipc_message::Payload::Alert(alert) => {
@@ -92,14 +104,26 @@ impl NexusIntercom for NexusIntercomImpl {
                                 timestamp: alert.timestamp,
                             };
 
-                            if let Err(mpsc::error::TrySendError::Full(_)) = event_tx.try_send(event) {
-                                let _ = tx.send(Err(Status::resource_exhausted("NetSentinel event queue is full"))).await;
+                            if let Err(mpsc::error::TrySendError::Full(_)) =
+                                event_tx.try_send(event)
+                            {
+                                let _ = tx
+                                    .send(Err(Status::resource_exhausted(
+                                        "NetSentinel event queue is full",
+                                    )))
+                                    .await;
                             }
                         }
                         nexus_ipc::ipc_message::Payload::CommandTrigger(cmd) => {
                             let event = AppEvent::IpcCommand(cmd);
-                            if let Err(mpsc::error::TrySendError::Full(_)) = event_tx.try_send(event) {
-                                let _ = tx.send(Err(Status::resource_exhausted("NetSentinel event queue is full"))).await;
+                            if let Err(mpsc::error::TrySendError::Full(_)) =
+                                event_tx.try_send(event)
+                            {
+                                let _ = tx
+                                    .send(Err(Status::resource_exhausted(
+                                        "NetSentinel event queue is full",
+                                    )))
+                                    .await;
                             }
                         }
                     }
@@ -115,7 +139,7 @@ impl NexusIntercom for NexusIntercomImpl {
         request: Request<IpcMessage>,
     ) -> Result<Response<IpcMessage>, Status> {
         let msg = request.into_inner();
-        
+
         if let Some(payload) = msg.payload.clone() {
             match payload {
                 nexus_ipc::ipc_message::Payload::HostDiscovered(host) => {
@@ -125,10 +149,12 @@ impl NexusIntercom for NexusIntercomImpl {
                     let mut device = Device::new(host.ip_address);
                     device.mac = host.mac_address;
                     device.status = DeviceStatus::Online;
-                    
+
                     let event = AppEvent::DeviceFound(device);
                     if let Err(mpsc::error::TrySendError::Full(_)) = self.event_tx.try_send(event) {
-                        return Err(Status::resource_exhausted("NetSentinel event queue is full"));
+                        return Err(Status::resource_exhausted(
+                            "NetSentinel event queue is full",
+                        ));
                     }
                 }
                 nexus_ipc::ipc_message::Payload::Alert(alert) => {
@@ -141,18 +167,22 @@ impl NexusIntercom for NexusIntercomImpl {
                         timestamp: alert.timestamp,
                     };
                     if let Err(mpsc::error::TrySendError::Full(_)) = self.event_tx.try_send(event) {
-                        return Err(Status::resource_exhausted("NetSentinel event queue is full"));
+                        return Err(Status::resource_exhausted(
+                            "NetSentinel event queue is full",
+                        ));
                     }
                 }
                 nexus_ipc::ipc_message::Payload::CommandTrigger(cmd) => {
                     let event = AppEvent::IpcCommand(cmd);
                     if let Err(mpsc::error::TrySendError::Full(_)) = self.event_tx.try_send(event) {
-                        return Err(Status::resource_exhausted("NetSentinel event queue is full"));
+                        return Err(Status::resource_exhausted(
+                            "NetSentinel event queue is full",
+                        ));
                     }
                 }
             }
         }
-        
+
         Ok(Response::new(msg))
     }
 }
@@ -168,9 +198,12 @@ impl IpcServer {
         }
     }
 
-    pub async fn run(self, event_tx: mpsc::Sender<AppEvent>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn run(
+        self,
+        event_tx: mpsc::Sender<AppEvent>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let path = Path::new(&self.socket_path);
-        
+
         // Clean up any stale socket file
         if path.exists() {
             std::fs::remove_file(path)?;

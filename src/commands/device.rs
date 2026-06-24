@@ -19,14 +19,11 @@ pub enum DeviceError {
 pub async fn get_device_info() -> Result<DeviceInfo, DeviceError> {
     let _sys = System::new_all();
 
-    let hostname = System::host_name()
-        .unwrap_or_else(|| "unknown".to_string());
+    let hostname = System::host_name().unwrap_or_else(|| "unknown".to_string());
 
-    let os_name = System::name()
-        .unwrap_or_else(|| "unknown".to_string());
+    let os_name = System::name().unwrap_or_else(|| "unknown".to_string());
 
-    let os_version = System::os_version()
-        .unwrap_or_else(|| "unknown".to_string());
+    let os_version = System::os_version().unwrap_or_else(|| "unknown".to_string());
 
     let uptime_secs = System::uptime();
     let uptime = format_uptime(uptime_secs);

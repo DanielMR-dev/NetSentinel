@@ -12,22 +12,21 @@
 
 use std::sync::Arc;
 
-use iced::{Element, Length, Subscription, Task};
-use iced::widget::{column, container, row, text};
 use futures::SinkExt;
+use iced::widget::{column, container, row, text};
+use iced::{Element, Length, Subscription, Task};
 use tokio::sync::mpsc;
 
 use crate::baseline::{Baseline, BaselineDiff};
+use crate::commands::platform::PlatformCapabilities;
 use crate::commands::{DeviceInfo, NetworkInfo};
 use crate::events::AppEvent;
 use crate::history::ScanHistoryEntry;
 use crate::network::cve::CveMatch;
 use crate::network::privileges::PrivilegeStatus;
-use crate::commands::platform::PlatformCapabilities;
 use crate::settings::SettingsProfile;
 use crate::state::SharedScanState;
 use crate::types::{Device, ScanType};
-
 
 pub mod theme;
 pub mod views;
@@ -43,6 +42,7 @@ pub enum Page {
     Settings,
     History,
     Baseline,
+    Topology,
 }
 
 impl Page {
@@ -53,6 +53,7 @@ impl Page {
             Page::Settings => "Settings",
             Page::History => "History",
             Page::Baseline => "Baseline",
+            Page::Topology => "Topology",
         }
     }
 
@@ -60,9 +61,10 @@ impl Page {
         &[
             Page::Dashboard,
             Page::Scan,
-            Page::Settings,
+            Page::Topology,
             Page::History,
             Page::Baseline,
+            Page::Settings,
         ]
     }
 }
@@ -109,13 +111,28 @@ pub enum Message {
     // Scan events (from subscription)
     DeviceDiscovered(Device),
     DevicesDiscovered(Vec<Device>),
-    ScanProgress { scanned: u32, total: u32, target: String },
-    ScanCompleted { scan_id: String, device_count: u32, duration_ms: u64 },
-    ScanLogReceived { level: String, message: String, target: Option<String>, timestamp: i64 },
+    ScanProgress {
+        scanned: u32,
+        total: u32,
+        target: String,
+    },
+    ScanCompleted {
+        scan_id: String,
+        device_count: u32,
+        duration_ms: u64,
+        devices: Vec<Device>,
+        status: String,
+    },
+    ScanLogReceived {
+        level: String,
+        message: String,
+        target: Option<String>,
+        timestamp: i64,
+    },
     CveAlertReceived(CveMatch),
     ScanStartResult(Result<String, String>),
     ScanStopResult(Result<(), String>),
-    
+
     // IPC
     IpcServerStopped(Result<(), String>),
     IpcCommandReceived(String),
@@ -181,7 +198,6 @@ pub enum Message {
     Tick,
 }
 
-
 // ── Scan Log Entry (UI display) ─────────────────────────────────────────
 
 /// A scan log entry for display in the UI
@@ -202,9 +218,9 @@ pub struct NetSentinelApp {
 
     // Backend integration
     scan_state: Arc<SharedScanState>,
-    event_rx: Arc<std::sync::Mutex<Option<mpsc::UnboundedReceiver<AppEvent>>>>,
+    event_rx: Arc<tokio::sync::Mutex<Option<mpsc::UnboundedReceiver<AppEvent>>>>,
     event_tx: Option<mpsc::UnboundedSender<AppEvent>>,
-    ipc_rx: Arc<std::sync::Mutex<Option<mpsc::Receiver<AppEvent>>>>,
+    ipc_rx: Arc<tokio::sync::Mutex<Option<mpsc::Receiver<AppEvent>>>>,
 
     // System info
     device_info: Option<DeviceInfo>,
@@ -261,10 +277,10 @@ impl NetSentinelApp {
     /// Create a new application instance with initial state
     fn new() -> (Self, Task<Message>) {
         let scan_state = Arc::new(SharedScanState::new());
-        let event_rx_arc = Arc::new(std::sync::Mutex::new(None));
+        let event_rx_arc = Arc::new(tokio::sync::Mutex::new(None));
 
         let (ipc_tx, ipc_rx) = mpsc::channel(1024);
-        let ipc_rx_arc = Arc::new(std::sync::Mutex::new(Some(ipc_rx)));
+        let ipc_rx_arc = Arc::new(tokio::sync::Mutex::new(Some(ipc_rx)));
 
         let app = Self {
             current_page: Page::Dashboard,
@@ -277,7 +293,9 @@ impl NetSentinelApp {
             privilege_status: None,
             platform_caps: None,
             scan_cidr: "192.168.1.0/24".to_string(),
-            scan_ports_str: "21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1723,3306,3389,5900,8080".to_string(),
+            scan_ports_str:
+                "21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1723,3306,3389,5900,8080"
+                    .to_string(),
             scan_type: ScanType::Connect,
             is_scanning: false,
             is_paused: false,
@@ -311,7 +329,9 @@ impl NetSentinelApp {
         // Load initial data
         let ipc_task = Task::perform(
             async move {
-                let _ = crate::ipc::IpcServer::new("/tmp/nexus_central.sock").run(ipc_tx).await;
+                let _ = crate::ipc::IpcServer::new("/tmp/nexus_central.sock")
+                    .run(ipc_tx)
+                    .await;
                 Ok(())
             },
             Message::IpcServerStopped,
@@ -342,8 +362,14 @@ impl NetSentinelApp {
             devices.retain(|d| {
                 d.ip.to_lowercase().contains(&query)
                     || d.mac.to_lowercase().contains(&query)
-                    || d.hostname.as_ref().map(|h| h.to_lowercase().contains(&query)).unwrap_or(false)
-                    || d.vendor.as_ref().map(|v| v.to_lowercase().contains(&query)).unwrap_or(false)
+                    || d.hostname
+                        .as_ref()
+                        .map(|h| h.to_lowercase().contains(&query))
+                        .unwrap_or(false)
+                    || d.vendor
+                        .as_ref()
+                        .map(|v| v.to_lowercase().contains(&query))
+                        .unwrap_or(false)
             });
         }
 
@@ -359,7 +385,9 @@ impl NetSentinelApp {
         // 3. Filter by Open Ports
         if self.filter_has_open_ports {
             devices.retain(|d| {
-                d.ports.iter().any(|p| format!("{:?}", p.state).to_lowercase() == "open")
+                d.ports
+                    .iter()
+                    .any(|p| format!("{:?}", p.state).to_lowercase() == "open")
             });
         }
 
@@ -369,8 +397,10 @@ impl NetSentinelApp {
         devices.sort_by(|a, b| {
             let ordering = match field {
                 SortField::Ip => {
-                    let a_parts: Vec<u32> = a.ip.split('.').filter_map(|p| p.parse().ok()).collect();
-                    let b_parts: Vec<u32> = b.ip.split('.').filter_map(|p| p.parse().ok()).collect();
+                    let a_parts: Vec<u32> =
+                        a.ip.split('.').filter_map(|p| p.parse().ok()).collect();
+                    let b_parts: Vec<u32> =
+                        b.ip.split('.').filter_map(|p| p.parse().ok()).collect();
                     a_parts.cmp(&b_parts)
                 }
                 SortField::Mac => a.mac.cmp(&b.mac),
@@ -385,8 +415,16 @@ impl NetSentinelApp {
                     a_h.cmp(b_h)
                 }
                 SortField::OpenPorts => {
-                    let a_open = a.ports.iter().filter(|p| format!("{:?}", p.state).to_lowercase() == "open").count();
-                    let b_open = b.ports.iter().filter(|p| format!("{:?}", p.state).to_lowercase() == "open").count();
+                    let a_open = a
+                        .ports
+                        .iter()
+                        .filter(|p| format!("{:?}", p.state).to_lowercase() == "open")
+                        .count();
+                    let b_open = b
+                        .ports
+                        .iter()
+                        .filter(|p| format!("{:?}", p.state).to_lowercase() == "open")
+                        .count();
                     a_open.cmp(&b_open)
                 }
                 SortField::LastSeen => a.last_seen.cmp(&b.last_seen),
@@ -414,14 +452,19 @@ impl NetSentinelApp {
             Message::DeviceInfoLoaded(result) => {
                 match result {
                     Ok(info) => self.device_info = Some(info),
-                    Err(e) => self.status_message = Some(format!("Failed to load device info: {}", e)),
+                    Err(e) => {
+                        self.status_message = Some(format!("Failed to load device info: {}", e))
+                    }
                 }
                 Task::none()
             }
             Message::NetworkInfoLoaded(result) => {
                 match result {
                     Ok(info) => {
-                        let cidr = if !info.gateway.is_empty() && info.gateway != "Unknown" && info.gateway != "0.0.0.0" {
+                        let cidr = if !info.gateway.is_empty()
+                            && info.gateway != "Unknown"
+                            && info.gateway != "0.0.0.0"
+                        {
                             calculate_cidr(&info.gateway)
                         } else if !info.ip_address.is_empty() && info.ip_address != "Unknown" {
                             calculate_cidr(&info.ip_address)
@@ -434,14 +477,19 @@ impl NetSentinelApp {
                         }
                         self.network_info = Some(info);
                     }
-                    Err(e) => self.status_message = Some(format!("Failed to load network info: {}", e)),
+                    Err(e) => {
+                        self.status_message = Some(format!("Failed to load network info: {}", e))
+                    }
                 }
                 Task::none()
             }
             Message::PrivilegeLoaded(result) => {
                 match result {
                     Ok(status) => self.privilege_status = Some(status),
-                    Err(e) => self.status_message = Some(format!("Failed to load privilege status: {}", e)),
+                    Err(e) => {
+                        self.status_message =
+                            Some(format!("Failed to load privilege status: {}", e))
+                    }
                 }
                 self.loading = false;
                 Task::none()
@@ -472,8 +520,9 @@ impl NetSentinelApp {
                 let (tx, rx) = mpsc::unbounded_channel();
                 self.event_tx = Some(tx.clone());
 
-                // Install receiver synchronously to avoid race with subscription
-                if let Ok(mut guard) = self.event_rx.lock() {
+                // Install receiver synchronously to avoid race with subscription.
+                // `try_lock` is used because `update()` is not async and must not block.
+                if let Ok(mut guard) = self.event_rx.try_lock() {
                     *guard = Some(rx);
                 }
 
@@ -575,7 +624,11 @@ impl NetSentinelApp {
                 Task::none()
             }
 
-            Message::ScanProgress { scanned, total, target } => {
+            Message::ScanProgress {
+                scanned,
+                total,
+                target,
+            } => {
                 self.scan_scanned = scanned;
                 self.scan_total = total;
                 self.scan_current_target = target;
@@ -585,19 +638,54 @@ impl NetSentinelApp {
                 Task::none()
             }
 
-            Message::ScanCompleted { scan_id: _, device_count: _, duration_ms: _ } => {
+            Message::ScanCompleted {
+                scan_id,
+                device_count,
+                duration_ms,
+                devices,
+                status,
+            } => {
                 self.is_scanning = false;
                 self.is_paused = false;
                 self.scan_progress = 1.0;
                 // Clear the receiver synchronously
-                if let Ok(mut guard) = self.event_rx.lock() {
+                if let Ok(mut guard) = self.event_rx.try_lock() {
                     *guard = None;
                 }
                 self.update_filtered_devices();
-                Task::none()
+
+                // Persist scan to history automatically, then reload history
+                let cidr = self.scan_cidr.clone();
+                let entry = crate::history::ScanHistoryEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    scan_id,
+                    cidr,
+                    device_count,
+                    duration_ms,
+                    status,
+                    devices,
+                    timestamp: chrono::Utc::now().timestamp(),
+                };
+
+                Task::perform(
+                    async move {
+                        if let Err(e) = crate::commands::save_scan_history(entry).await {
+                            tracing::warn!("Failed to persist scan history: {}", e);
+                        }
+                        crate::commands::get_scan_history()
+                            .await
+                            .map_err(|e| e.to_string())
+                    },
+                    Message::HistoryLoaded,
+                )
             }
 
-            Message::ScanLogReceived { level, message, target, timestamp } => {
+            Message::ScanLogReceived {
+                level,
+                message,
+                target,
+                timestamp,
+            } => {
                 self.scan_logs.push(ScanLogEntry {
                     level,
                     message,
@@ -702,7 +790,9 @@ impl NetSentinelApp {
                     Ok(profile) => {
                         self.settings_profile = profile.clone();
                         // Sync profile default CIDR if it has been customized
-                        if profile.scan_config.default_cidr != "192.168.1.0/24" && !profile.scan_config.default_cidr.is_empty() {
+                        if profile.scan_config.default_cidr != "192.168.1.0/24"
+                            && !profile.scan_config.default_cidr.is_empty()
+                        {
                             self.scan_cidr = profile.scan_config.default_cidr.clone();
                         }
                     }
@@ -867,16 +957,14 @@ impl NetSentinelApp {
                 Task::none()
             }
 
-            Message::ClearHistory => {
-                Task::perform(
-                    async {
-                        crate::commands::clear_scan_history()
-                            .await
-                            .map_err(|e| e.to_string())
-                    },
-                    Message::HistoryCleared,
-                )
-            }
+            Message::ClearHistory => Task::perform(
+                async {
+                    crate::commands::clear_scan_history()
+                        .await
+                        .map_err(|e| e.to_string())
+                },
+                Message::HistoryCleared,
+            ),
 
             Message::HistoryEntryToggled(id) => {
                 if self.expanded_history.as_deref() == Some(&id) {
@@ -891,7 +979,9 @@ impl NetSentinelApp {
             Message::BaselinesLoaded(result) => {
                 match result {
                     Ok(baselines) => self.baselines = baselines,
-                    Err(e) => self.status_message = Some(format!("Failed to load baselines: {}", e)),
+                    Err(e) => {
+                        self.status_message = Some(format!("Failed to load baselines: {}", e))
+                    }
                 }
                 Task::none()
             }
@@ -944,7 +1034,9 @@ impl NetSentinelApp {
                     Ok(id) => {
                         self.baselines.retain(|b| b.id != id);
                     }
-                    Err(e) => self.status_message = Some(format!("Failed to delete baseline: {}", e)),
+                    Err(e) => {
+                        self.status_message = Some(format!("Failed to delete baseline: {}", e))
+                    }
                 }
                 Task::none()
             }
@@ -965,7 +1057,9 @@ impl NetSentinelApp {
             Message::BaselineCompared(result) => {
                 match result {
                     Ok(diff) => self.baseline_diff = Some(diff),
-                    Err(e) => self.status_message = Some(format!("Failed to compare baseline: {}", e)),
+                    Err(e) => {
+                        self.status_message = Some(format!("Failed to compare baseline: {}", e))
+                    }
                 }
                 Task::none()
             }
@@ -1061,7 +1155,9 @@ impl NetSentinelApp {
 
             Message::ExportCompleted(result) => {
                 match result {
-                    Ok(true) => self.status_message = Some("Report exported successfully".to_string()),
+                    Ok(true) => {
+                        self.status_message = Some("Report exported successfully".to_string())
+                    }
                     Ok(false) => self.status_message = Some("Export cancelled".to_string()),
                     Err(e) => self.status_message = Some(format!("Export failed: {}", e)),
                 }
@@ -1093,6 +1189,7 @@ impl NetSentinelApp {
         let content: Element<'_, Message> = match self.current_page {
             Page::Dashboard => views::dashboard::view(self),
             Page::Scan => views::scan::view(self),
+            Page::Topology => self.view_topology_placeholder(),
             Page::Settings => views::settings::view(self),
             Page::History => views::history::view(self),
             Page::Baseline => views::baseline::view(self),
@@ -1136,9 +1233,7 @@ impl NetSentinelApp {
             .width(Length::Fixed(32.0))
             .height(Length::Fixed(32.0));
 
-        let title = text("NetSentinel")
-            .color(theme::PRIMARY)
-            .size(20);
+        let title = text("NetSentinel").color(theme::PRIMARY).size(20);
 
         let header_left = row![logo, title]
             .spacing(10)
@@ -1147,7 +1242,7 @@ impl NetSentinelApp {
         let theme_btn = iced::widget::button(
             text(if self.theme_dark { "🌙" } else { "☀️" })
                 .size(14)
-                .color(theme::TEXT)
+                .color(theme::TEXT),
         )
         .padding([6, 12])
         .style(theme::secondary_button)
@@ -1174,21 +1269,17 @@ impl NetSentinelApp {
 
         for page in Page::all() {
             let is_active = self.current_page == *page;
-            
+
             // Stack the button and a bottom indicator line in a column
             let tab_element = column![
-                iced::widget::button(
-                    text(page.label())
-                        .size(14)
-                )
-                .padding([8, 4])
-                .style(if is_active {
-                    theme::active_tab_button
-                } else {
-                    theme::tab_button
-                })
-                .on_press(Message::NavigateTo(page.clone())),
-                
+                iced::widget::button(text(page.label()).size(14))
+                    .padding([8, 4])
+                    .style(if is_active {
+                        theme::active_tab_button
+                    } else {
+                        theme::tab_button
+                    })
+                    .on_press(Message::NavigateTo(page.clone())),
                 // Active indicator line
                 container(iced::widget::horizontal_space().width(Length::Fill))
                     .height(2)
@@ -1235,6 +1326,28 @@ impl NetSentinelApp {
         }
     }
 
+    /// Placeholder view for the Topology page.
+    ///
+    /// Renders a non-breaking placeholder panel while the topology graph
+    /// visualization is being implemented.
+    fn view_topology_placeholder(&self) -> Element<'_, Message> {
+        let title = text("Network Topology").size(24).color(theme::TEXT);
+
+        let subtitle = text(
+            "Topology visualization is coming soon. This page will display an \
+             interactive graph of discovered devices and their relationships.",
+        )
+        .size(14)
+        .color(theme::TEXT_MUTED);
+
+        column![title, subtitle]
+            .spacing(16)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::Alignment::Center)
+            .into()
+    }
+
     /// Render the status bar at the bottom
     fn view_status(&self) -> Element<'_, Message> {
         let status_text = if let Some(ref msg) = self.status_message {
@@ -1249,9 +1362,7 @@ impl NetSentinelApp {
             .color(theme::TEXT_MUTED)
             .size(12)
         } else {
-            text("Ready")
-                .color(theme::TEXT_MUTED)
-                .size(12)
+            text("Ready").color(theme::TEXT_MUTED).size(12)
         };
 
         let mut status_row = row![
@@ -1286,10 +1397,7 @@ impl NetSentinelApp {
         subs.push(Subscription::run_with_id(
             "ipc-events",
             iced::stream::channel(100, move |mut output| async move {
-                let mut receiver = {
-                    let mut guard = ipc_rx_arc.lock().unwrap_or_else(|e| e.into_inner());
-                    guard.take()
-                };
+                let mut receiver = ipc_rx_arc.lock().await.take();
 
                 if let Some(ref mut rx) = receiver {
                     let mut buffer = Vec::new();
@@ -1343,10 +1451,7 @@ impl NetSentinelApp {
             subs.push(Subscription::run_with_id(
                 "scan-events",
                 iced::stream::channel(100, move |mut output| async move {
-                    let mut receiver = {
-                        let mut guard = rx.lock().unwrap_or_else(|e| e.into_inner());
-                        guard.take()
-                    };
+                    let mut receiver = rx.lock().await.take();
 
                     if let Some(ref mut rx) = receiver {
                         let mut buffer = Vec::new();
@@ -1370,12 +1475,12 @@ impl NetSentinelApp {
                                         Some(AppEvent::ScanProgress { scanned, total, current_target }) => {
                                             if output.send(Message::ScanProgress { scanned, total, target: current_target }).await.is_err() { break; }
                                         }
-                                        Some(AppEvent::ScanComplete { scan_id, device_count, duration_ms, status: _ }) => {
+                                        Some(AppEvent::ScanComplete { scan_id, device_count, duration_ms, status, devices }) => {
                                             if !buffer.is_empty() {
                                                 let batch = std::mem::take(&mut buffer);
                                                 let _ = output.send(Message::DevicesDiscovered(batch)).await;
                                             }
-                                            if output.send(Message::ScanCompleted { scan_id, device_count, duration_ms }).await.is_err() { break; }
+                                            if output.send(Message::ScanCompleted { scan_id, device_count, duration_ms, devices, status }).await.is_err() { break; }
                                         }
                                         Some(AppEvent::ScanLog { level, message, target, timestamp }) => {
                                             if output.send(Message::ScanLogReceived { level, message, target, timestamp }).await.is_err() { break; }
@@ -1440,9 +1545,7 @@ fn load_privilege_status() -> Task<Message> {
 /// Load platform capabilities
 fn load_platform_caps() -> Task<Message> {
     Task::perform(
-        async {
-            crate::commands::get_platform_capabilities()
-        },
+        async { crate::commands::get_platform_capabilities() },
         Message::PlatformCapsLoaded,
     )
 }

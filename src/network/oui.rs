@@ -1403,6 +1403,10 @@ mod tests {
         // matches the number of unique insertions
         let table = &*OUI_TABLE;
         // The table should have a large number of entries covering 40+ vendors
-        assert!(table.len() > 800, "OUI table should have >800 entries, got {}", table.len());
+        assert!(
+            table.len() > 800,
+            "OUI table should have >800 entries, got {}",
+            table.len()
+        );
     }
 }

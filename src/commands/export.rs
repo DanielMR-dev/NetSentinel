@@ -3,9 +3,9 @@
 //! Provides `export_audit_report` for exporting scan results in CSV or JSON
 //! format using a native file dialog.
 
-use std::path::PathBuf;
 use crate::error::ScanError;
 use crate::types::Device;
+use std::path::PathBuf;
 
 /// Helper function to convert Vec<Device> to a CSV string.
 fn devices_to_csv(devices: &[Device]) -> String {
@@ -49,7 +49,10 @@ fn devices_to_csv(devices: &[Device]) -> String {
         }
         let cves_str = escape(&cve_ids.join("; "));
 
-        csv.push_str(&format!("{},{},{},{},{},{},{},{}\n", ip, mac, hostname, vendor, os, status, ports_str, cves_str));
+        csv.push_str(&format!(
+            "{},{},{},{},{},{},{},{}\n",
+            ip, mac, hostname, vendor, os, status, ports_str, cves_str
+        ));
     }
     csv
 }
@@ -60,7 +63,9 @@ fn devices_to_csv(devices: &[Device]) -> String {
 pub async fn export_audit_report(format: String, devices: Vec<Device>) -> Result<bool, ScanError> {
     let fmt = format.to_lowercase();
     if fmt != "csv" && fmt != "json" {
-        return Err(ScanError::InvalidInput("Format must be 'csv' or 'json'".to_string()));
+        return Err(ScanError::InvalidInput(
+            "Format must be 'csv' or 'json'".to_string(),
+        ));
     }
 
     let fmt_clone = fmt.clone();
@@ -76,7 +81,11 @@ pub async fn export_audit_report(format: String, devices: Vec<Device>) -> Result
                     .unwrap_or_else(|| PathBuf::from(".")),
             )
             .add_filter(
-                if fmt_clone == "csv" { "CSV File (*.csv)" } else { "JSON File (*.json)" },
+                if fmt_clone == "csv" {
+                    "CSV File (*.csv)"
+                } else {
+                    "JSON File (*.json)"
+                },
                 &[&fmt_clone],
             )
             .save_file()
@@ -92,7 +101,8 @@ pub async fn export_audit_report(format: String, devices: Vec<Device>) -> Result
                 .map_err(|e| ScanError::NetworkError(format!("JSON serialization failed: {}", e)))?
         };
 
-        tokio::fs::write(&path, content).await
+        tokio::fs::write(&path, content)
+            .await
             .map_err(|e| ScanError::NetworkError(format!("Failed to write report file: {}", e)))?;
         Ok(true)
     } else {
@@ -113,14 +123,12 @@ mod tests {
         dev1.vendor = Some("Apple".to_string());
         dev1.os = Some("Linux/Android".to_string());
         dev1.status = DeviceStatus::Online;
-        dev1.ports = vec![
-            Port {
-                number: 80,
-                protocol: "tcp".to_string(),
-                service: Some("http".to_string()),
-                state: PortState::Open,
-            }
-        ];
+        dev1.ports = vec![Port {
+            number: 80,
+            protocol: "tcp".to_string(),
+            service: Some("http".to_string()),
+            state: PortState::Open,
+        }];
 
         let csv = devices_to_csv(&[dev1]);
         println!("{}", csv);

@@ -53,15 +53,10 @@ impl BannerGrabber {
     ///
     /// Connects via TCP, sends an appropriate probe based on the port,
     /// and reads the response to identify the service.
-    pub async fn grab_banner(
-        &self,
-        ip: &str,
-        port: u16,
-    ) -> Result<BannerResult, ScanError> {
+    pub async fn grab_banner(&self, ip: &str, port: u16) -> Result<BannerResult, ScanError> {
         let addr = format!("{}:{}", ip, port);
 
-        let connect_result =
-            tokio::time::timeout(self.timeout, TcpStream::connect(&addr)).await;
+        let connect_result = tokio::time::timeout(self.timeout, TcpStream::connect(&addr)).await;
 
         let mut stream = match connect_result {
             Ok(Ok(stream)) => stream,
@@ -98,8 +93,7 @@ impl BannerGrabber {
 
         // Read response
         let mut buf = vec![0u8; 4096];
-        let read_result =
-            tokio::time::timeout(self.timeout, stream.read(&mut buf)).await;
+        let read_result = tokio::time::timeout(self.timeout, stream.read(&mut buf)).await;
 
         let bytes_read = match read_result {
             Ok(Ok(n)) => n,
@@ -144,11 +138,7 @@ impl BannerGrabber {
     ///
     /// Only attempts ports that are in the `BANNER_PORTS` list.
     /// Returns successful grabs only; failures are silently skipped.
-    pub async fn grab_banners(
-        &self,
-        ip: &str,
-        open_ports: &[u16],
-    ) -> Vec<BannerResult> {
+    pub async fn grab_banners(&self, ip: &str, open_ports: &[u16]) -> Vec<BannerResult> {
         use futures::stream::{self, StreamExt};
 
         let ports_to_grab: Vec<u16> = open_ports
@@ -158,9 +148,7 @@ impl BannerGrabber {
             .collect();
 
         stream::iter(ports_to_grab)
-            .filter_map(|port| async move {
-                self.grab_banner(ip, port).await.ok()
-            })
+            .filter_map(|port| async move { self.grab_banner(ip, port).await.ok() })
             .collect()
             .await
     }
@@ -291,7 +279,9 @@ fn extract_version_string(banner_lower: &str, keyword: &str) -> Option<String> {
     // Extract version-like token (digits, dots, letters, hyphens)
     let version: String = after
         .chars()
-        .take_while(|c| c.is_ascii_digit() || *c == '.' || c.is_ascii_alphabetic() || *c == '-' || *c == '_')
+        .take_while(|c| {
+            c.is_ascii_digit() || *c == '.' || c.is_ascii_alphabetic() || *c == '-' || *c == '_'
+        })
         .take(30) // Limit version string length
         .collect();
 
@@ -428,18 +418,9 @@ mod tests {
 
     #[test]
     fn test_extract_version() {
-        assert_eq!(
-            extract_version("OpenSSH_8.9p1"),
-            Some("8.9p1".to_string())
-        );
-        assert_eq!(
-            extract_version("nginx/1.24.0"),
-            Some("1.24.0".to_string())
-        );
-        assert_eq!(
-            extract_version("Apache/2.4.57"),
-            Some("2.4.57".to_string())
-        );
+        assert_eq!(extract_version("OpenSSH_8.9p1"), Some("8.9p1".to_string()));
+        assert_eq!(extract_version("nginx/1.24.0"), Some("1.24.0".to_string()));
+        assert_eq!(extract_version("Apache/2.4.57"), Some("2.4.57".to_string()));
     }
 
     #[test]

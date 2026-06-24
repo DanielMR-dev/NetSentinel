@@ -4,12 +4,10 @@
 //! cards, info rows, status badges, port badges, loading spinners,
 //! and privilege banners.
 
-use iced::{Border, Color, Length, Theme};
 use iced::widget::{container, row, text};
+use iced::{Border, Color, Length, Theme};
 
-use crate::ui::theme::{
-    DANGER, INFO, SUCCESS, SURFACE, TEXT, TEXT_MUTED, WARNING, WARNING_BG,
-};
+use crate::ui::theme::{DANGER, INFO, SUCCESS, SURFACE, TEXT, TEXT_MUTED, WARNING, WARNING_BG};
 
 /// Create a styled card container with optional title
 pub fn card<'a, Message: 'a>(
@@ -19,11 +17,7 @@ pub fn card<'a, Message: 'a>(
     let mut col = iced::widget::column![].spacing(8);
 
     if let Some(title) = title {
-        col = col.push(
-            text(title.to_string())
-                .color(TEXT)
-                .size(15),
-        );
+        col = col.push(text(title.to_string()).color(TEXT).size(15));
     }
 
     col = col.push(content);
@@ -35,25 +29,16 @@ pub fn card<'a, Message: 'a>(
 }
 
 /// Create an info row with a label and value
-pub fn info_row<'a, Message: 'a>(
-    label: &'a str,
-    value: String,
-) -> iced::widget::Row<'a, Message> {
+pub fn info_row<'a, Message: 'a>(label: &'a str, value: String) -> iced::widget::Row<'a, Message> {
     row![
-        text(label)
-            .color(TEXT_MUTED)
-            .size(13),
+        text(label).color(TEXT_MUTED).size(13),
         iced::widget::horizontal_space().width(Length::Fixed(8.0)),
-        text(value)
-            .color(TEXT)
-            .size(13),
+        text(value).color(TEXT).size(13),
     ]
 }
 
 /// Create a status badge (colored pill indicator)
-pub fn status_badge<'a, Message: 'a>(
-    status: &str,
-) -> container::Container<'a, Message> {
+pub fn status_badge<'a, Message: 'a>(status: &str) -> container::Container<'a, Message> {
     let (bg_color, text_color) = match status.to_lowercase().as_str() {
         "online" | "completed" | "success" | "open" => (SUCCESS, TEXT),
         "offline" | "error" | "failed" | "closed" => (DANGER, TEXT),
@@ -86,25 +71,17 @@ pub fn port_badge<'a, Message: 'a>(
         format!("{}/{}", port, state)
     };
 
-    row![
-        container(text(label).color(TEXT).size(12))
-            .padding([2, 6])
-            .style(move |_theme: &Theme| badge_appearance(state_color)),
-    ]
+    row![container(text(label).color(TEXT).size(12))
+        .padding([2, 6])
+        .style(move |_theme: &Theme| badge_appearance(state_color)),]
 }
 
 /// Create a loading spinner indicator (text-based for simplicity)
-pub fn loading_spinner<'a, Message: 'a>(
-    message: &'a str,
-) -> iced::widget::Row<'a, Message> {
+pub fn loading_spinner<'a, Message: 'a>(message: &'a str) -> iced::widget::Row<'a, Message> {
     row![
-        text("[*]")
-            .color(INFO)
-            .size(14),
+        text("[*]").color(INFO).size(14),
         iced::widget::horizontal_space().width(Length::Fixed(8.0)),
-        text(message)
-            .color(TEXT_MUTED)
-            .size(13),
+        text(message).color(TEXT_MUTED).size(13),
     ]
 }
 
@@ -116,19 +93,11 @@ pub fn privilege_banner<'a, Message: 'a>(
         return None;
     }
 
-    let mut col = iced::widget::column![
-        text("Privilege Warning")
-            .color(WARNING)
-            .size(14),
-    ]
-    .spacing(4);
+    let mut col =
+        iced::widget::column![text("Privilege Warning").color(WARNING).size(14),].spacing(4);
 
     for warning in warnings {
-        col = col.push(
-            text(warning.as_str())
-                .color(TEXT_MUTED)
-                .size(12),
-        );
+        col = col.push(text(warning.as_str()).color(TEXT_MUTED).size(12));
     }
 
     Some(

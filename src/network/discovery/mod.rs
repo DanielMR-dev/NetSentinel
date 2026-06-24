@@ -4,8 +4,8 @@
 //! - `arp_table`: Read the system's ARP table for cached entries
 //! - `tcp_probe`: TCP port probing as a fallback when ARP is unavailable
 
-pub mod arp_table;
 pub mod arp_sweep;
+pub mod arp_table;
 pub mod tcp_probe;
 
 use tokio::sync::mpsc;

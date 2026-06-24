@@ -1,10 +1,10 @@
 //! Scan view — configuration panel, progress bar, results table,
 //! device detail panel, and scan logs.
 
-use iced::{Alignment, Length};
 use iced::widget::{
     button, checkbox, column, container, pick_list, progress_bar, row, scrollable, text, text_input,
 };
+use iced::{Alignment, Length};
 
 use crate::types::ScanType;
 use crate::ui::theme::{self, TEXT, TEXT_MUTED};
@@ -13,7 +13,10 @@ use crate::ui::{Message, NetSentinelApp};
 
 /// Render the Scan page.
 pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
-    let mut content = column![].spacing(16).width(Length::Fill).height(Length::Fill);
+    let mut content = column![]
+        .spacing(16)
+        .width(Length::Fill)
+        .height(Length::Fill);
 
     // ── Configuration Panel ─────────────────────────────────────────────
     let cidr_input = text_input("Target CIDR (e.g. 192.168.1.0/24)", &app.scan_cidr)
@@ -21,10 +24,13 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         .padding(10)
         .size(14);
 
-    let ports_input = text_input("Ports (comma-separated, e.g. 22,80,443)", &app.scan_ports_str)
-        .on_input(Message::ScanPortsChanged)
-        .padding(10)
-        .size(14);
+    let ports_input = text_input(
+        "Ports (comma-separated, e.g. 22,80,443)",
+        &app.scan_ports_str,
+    )
+    .on_input(Message::ScanPortsChanged)
+    .padding(10)
+    .size(14);
 
     let scan_type_picker = pick_list(
         &ScanType::all_types()[..],
@@ -35,12 +41,11 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     .text_size(14)
     .width(Length::Fill);
 
-    let start_btn = button(
-        row![text("Start Scan").color(TEXT).size(15)].align_y(Alignment::Center)
-    )
-    .padding([10, 24])
-    .style(theme::primary_button)
-    .on_press(Message::StartScan);
+    let start_btn =
+        button(row![text("Start Scan").color(TEXT).size(15)].align_y(Alignment::Center))
+            .padding([10, 24])
+            .style(theme::primary_button)
+            .on_press(Message::StartScan);
 
     let stop_btn = button(text("Stop Scan").color(TEXT).size(15))
         .padding([10, 24])
@@ -74,12 +79,9 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         ]
         .spacing(6)
         .width(Length::FillPortion(3)),
-        column![
-            text("Target Ports").color(TEXT_MUTED).size(12),
-            ports_input,
-        ]
-        .spacing(6)
-        .width(Length::FillPortion(3)),
+        column![text("Target Ports").color(TEXT_MUTED).size(12), ports_input,]
+            .spacing(6)
+            .width(Length::FillPortion(3)),
         column![
             text("Scan Type").color(TEXT_MUTED).size(12),
             scan_type_picker,
@@ -98,9 +100,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
 
     let config_card = widgets::card(
         Some("Scan Configuration"),
-        column![config_row]
-            .spacing(16)
-            .width(Length::Fill),
+        column![config_row].spacing(16).width(Length::Fill),
     );
 
     content = content.push(config_card);
@@ -122,8 +122,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         .color(TEXT_MUTED)
         .size(12);
 
-        let progress_bar_widget = progress_bar(0.0..=1.0, app.scan_progress)
-            .height(8);
+        let progress_bar_widget = progress_bar(0.0..=1.0, app.scan_progress).height(8);
 
         let progress_card = widgets::card(
             Some("Scan Progress"),
@@ -137,7 +136,12 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
 
     // ── Toolbar Header (Title, Exports) ─────────────────────────────────
     let toolbar = row![
-        text(format!("Discovered Devices ({})", app.discovered_devices.len())).color(TEXT).size(15),
+        text(format!(
+            "Discovered Devices ({})",
+            app.discovered_devices.len()
+        ))
+        .color(TEXT)
+        .size(15),
         iced::widget::horizontal_space().width(Length::Fill),
         button(text("Export CSV").size(12))
             .padding([4, 8])
@@ -159,7 +163,12 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         .size(12);
 
     let mut status_row = row![].spacing(4).align_y(Alignment::Center);
-    for (val, label) in &[("all", "All"), ("online", "Online"), ("offline", "Offline"), ("unknown", "Unknown")] {
+    for (val, label) in &[
+        ("all", "All"),
+        ("online", "Online"),
+        ("offline", "Offline"),
+        ("unknown", "Unknown"),
+    ] {
         let is_active = app.filter_status == *val;
         status_row = status_row.push(
             button(text(*label).size(11))
@@ -169,7 +178,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
                 } else {
                     theme::secondary_button
                 })
-                .on_press(Message::FilterStatusChanged(val.to_string()))
+                .on_press(Message::FilterStatusChanged(val.to_string())),
         );
     }
 
@@ -196,13 +205,17 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
             button(text("Clear").size(11))
                 .padding([4, 8])
                 .style(theme::danger_button)
-                .on_press(Message::ClearFilters)
+                .on_press(Message::ClearFilters),
         );
     }
 
-    let results_count = text(format!("Showing {} of {} devices", app.filtered_devices.len(), app.discovered_devices.len()))
-        .color(TEXT_MUTED)
-        .size(11);
+    let results_count = text(format!(
+        "Showing {} of {} devices",
+        app.filtered_devices.len(),
+        app.discovered_devices.len()
+    ))
+    .color(TEXT_MUTED)
+    .size(11);
 
     let filter_bar = row![
         filter_row,
@@ -226,9 +239,16 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         };
         button(
             row![
-                text(label).color(if is_active { theme::PRIMARY } else { TEXT_MUTED }).size(11),
+                text(label)
+                    .color(if is_active {
+                        theme::PRIMARY
+                    } else {
+                        TEXT_MUTED
+                    })
+                    .size(11),
                 text(icon).color(TEXT_MUTED).size(10),
-            ].spacing(2)
+            ]
+            .spacing(2),
         )
         .style(theme::tab_button)
         .on_press(Message::SortTableBy(field))
@@ -236,12 +256,36 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     };
 
     let table_header = row![
-        make_header("IP Address", crate::ui::SortField::Ip, Length::FillPortion(2)),
-        make_header("MAC Address", crate::ui::SortField::Mac, Length::FillPortion(2)),
-        make_header("Vendor", crate::ui::SortField::Vendor, Length::FillPortion(2)),
-        make_header("Hostname", crate::ui::SortField::Hostname, Length::FillPortion(2)),
-        make_header("Open Ports", crate::ui::SortField::OpenPorts, Length::FillPortion(1)),
-        make_header("Last Seen", crate::ui::SortField::LastSeen, Length::FillPortion(2)),
+        make_header(
+            "IP Address",
+            crate::ui::SortField::Ip,
+            Length::FillPortion(2)
+        ),
+        make_header(
+            "MAC Address",
+            crate::ui::SortField::Mac,
+            Length::FillPortion(2)
+        ),
+        make_header(
+            "Vendor",
+            crate::ui::SortField::Vendor,
+            Length::FillPortion(2)
+        ),
+        make_header(
+            "Hostname",
+            crate::ui::SortField::Hostname,
+            Length::FillPortion(2)
+        ),
+        make_header(
+            "Open Ports",
+            crate::ui::SortField::OpenPorts,
+            Length::FillPortion(1)
+        ),
+        make_header(
+            "Last Seen",
+            crate::ui::SortField::LastSeen,
+            Length::FillPortion(2)
+        ),
     ]
     .spacing(8)
     .padding([6, 12])
@@ -258,14 +302,9 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         } else {
             "No devices match the current filters."
         };
-        
+
         let empty_state = container(
-            column![
-                text(empty_msg)
-                    .color(TEXT_MUTED)
-                    .size(15),
-            ]
-            .align_x(Alignment::Center)
+            column![text(empty_msg).color(TEXT_MUTED).size(15),].align_x(Alignment::Center),
         )
         .center_x(Length::Fill)
         .center_y(Length::Fixed(200.0))
@@ -279,15 +318,37 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
             let vendor = device.vendor.as_deref().unwrap_or("-");
             let port_count = device.ports.len();
 
-            let is_selected = app.selected_device.as_ref().map(|d| d.ip == device.ip).unwrap_or(false);
+            let is_selected = app
+                .selected_device
+                .as_ref()
+                .map(|d| d.ip == device.ip)
+                .unwrap_or(false);
 
             let row_content = row![
-                text(&device.ip).color(TEXT).size(12).width(Length::FillPortion(2)),
-                text(&device.mac).color(TEXT).size(12).width(Length::FillPortion(2)),
-                text(vendor).color(TEXT_MUTED).size(12).width(Length::FillPortion(2)),
-                text(hostname).color(TEXT).size(12).width(Length::FillPortion(2)),
-                text(format!("{}", port_count)).color(TEXT).size(12).width(Length::FillPortion(1)),
-                text(format_timestamp(device.last_seen)).color(TEXT_MUTED).size(11).width(Length::FillPortion(2)),
+                text(&device.ip)
+                    .color(TEXT)
+                    .size(12)
+                    .width(Length::FillPortion(2)),
+                text(&device.mac)
+                    .color(TEXT)
+                    .size(12)
+                    .width(Length::FillPortion(2)),
+                text(vendor)
+                    .color(TEXT_MUTED)
+                    .size(12)
+                    .width(Length::FillPortion(2)),
+                text(hostname)
+                    .color(TEXT)
+                    .size(12)
+                    .width(Length::FillPortion(2)),
+                text(format!("{}", port_count))
+                    .color(TEXT)
+                    .size(12)
+                    .width(Length::FillPortion(1)),
+                text(format_timestamp(device.last_seen))
+                    .color(TEXT_MUTED)
+                    .size(11)
+                    .width(Length::FillPortion(2)),
             ]
             .spacing(8)
             .padding([8, 12])
@@ -330,7 +391,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     // ── Device Detail Panel (Split view on right) ────────────────────────
     let results_block: iced::Element<'_, Message> = if let Some(ref device) = app.selected_device {
         let mut detail_col = column![].spacing(16).width(Length::Fill);
-        
+
         detail_col = detail_col.push(
             row![
                 text("Device Details").color(TEXT).size(18),
@@ -340,7 +401,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
                     .style(theme::secondary_button)
                     .on_press(Message::DeviceSelected(None))
             ]
-            .align_y(Alignment::Center)
+            .align_y(Alignment::Center),
         );
 
         let info_section = column![
@@ -354,18 +415,16 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
                 "Vendor:",
                 device.vendor.clone().unwrap_or_else(|| "-".to_string()),
             ),
-            widgets::info_row(
-                "OS:",
-                device.os.clone().unwrap_or_else(|| "-".to_string()),
-            ),
+            widgets::info_row("OS:", device.os.clone().unwrap_or_else(|| "-".to_string()),),
             row![
                 text("Status:").color(TEXT_MUTED).size(13),
                 iced::widget::horizontal_space().width(Length::Fixed(10.0)),
                 widgets::status_badge(&format!("{:?}", device.status))
             ]
             .align_y(Alignment::Center)
-        ].spacing(10);
-        
+        ]
+        .spacing(10);
+
         detail_col = detail_col.push(info_section);
 
         // Ports list
@@ -416,11 +475,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     let mut logs_list = column![].spacing(2);
 
     if app.scan_logs.is_empty() {
-        logs_list = logs_list.push(
-            text("No scan logs yet.")
-                .color(TEXT_MUTED)
-                .size(12),
-        );
+        logs_list = logs_list.push(text("No scan logs yet.").color(TEXT_MUTED).size(12));
     } else {
         let start = if app.scan_logs.len() > 50 {
             app.scan_logs.len() - 50
@@ -446,13 +501,20 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
 
     let logs_card = container(
         column![
-            text("Scan Logs").color(TEXT).size(16).font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() }),
+            text("Scan Logs").color(TEXT).size(16).font(iced::Font {
+                weight: iced::font::Weight::Bold,
+                ..Default::default()
+            }),
             container(scrollable(logs_list).height(Length::Fixed(150.0)))
                 .padding(12)
                 .width(Length::Fill)
                 .style(theme::terminal_style)
-        ].spacing(12)
-    ).padding(20).width(Length::Fill).style(theme::card_style);
+        ]
+        .spacing(12),
+    )
+    .padding(20)
+    .width(Length::Fill)
+    .style(theme::card_style);
 
     content = content.push(logs_card);
 
@@ -472,7 +534,9 @@ fn format_timestamp(ts: i64) -> String {
 }
 
 /// Helper function to style table rows as clickable buttons
-fn row_button_style(is_selected: bool) -> impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style {
+fn row_button_style(
+    is_selected: bool,
+) -> impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style {
     move |_theme, status| {
         let bg = if is_selected {
             iced::Color {

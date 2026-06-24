@@ -12,6 +12,7 @@ pub mod network;
 pub mod platform;
 pub mod privilege;
 pub mod scan;
+pub mod scheduler;
 pub mod settings;
 
 use serde::Serialize;

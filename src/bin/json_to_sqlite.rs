@@ -1,5 +1,5 @@
 use rusqlite::{Connection, Result};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::fs;
 
 #[derive(Debug, Deserialize)]
@@ -17,9 +17,9 @@ struct CveDatabaseRaw {
     vulnerabilities: Vec<CveEntry>,
 }
 
-fn main() -> Result<()> {
-    let json_content = fs::read_to_string("assets/cve-database.json").expect("Failed to read JSON");
-    let raw: CveDatabaseRaw = serde_json::from_str(&json_content).expect("Failed to parse JSON");
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let json_content = fs::read_to_string("assets/cve-database.json")?;
+    let raw: CveDatabaseRaw = serde_json::from_str(&json_content)?;
 
     let conn = Connection::open("assets/cve-database.db")?;
 
@@ -42,7 +42,7 @@ fn main() -> Result<()> {
         )",
         (),
     )?;
-    
+
     // Create an index for faster lookups by affected software
     conn.execute(
         "CREATE INDEX idx_cves_software ON cves(affected_software)",
@@ -50,7 +50,8 @@ fn main() -> Result<()> {
     )?;
 
     let mut stmt1 = conn.prepare("INSERT OR IGNORE INTO cves (cve_id, severity, description, affected_software, cvss_score) VALUES (?1, ?2, ?3, ?4, ?5)")?;
-    let mut stmt2 = conn.prepare("INSERT INTO affected_versions (cve_id, version_pattern) VALUES (?1, ?2)")?;
+    let mut stmt2 =
+        conn.prepare("INSERT INTO affected_versions (cve_id, version_pattern) VALUES (?1, ?2)")?;
 
     for entry in raw.vulnerabilities {
         stmt1.execute(rusqlite::params![
@@ -62,10 +63,7 @@ fn main() -> Result<()> {
         ])?;
 
         for version in entry.affected_versions {
-            stmt2.execute(rusqlite::params![
-                entry.cve_id,
-                version,
-            ])?;
+            stmt2.execute(rusqlite::params![entry.cve_id, version,])?;
         }
     }
 

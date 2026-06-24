@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use reqwest::{Client, redirect::Policy};
+use reqwest::{redirect::Policy, Client};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
@@ -52,16 +52,23 @@ pub async fn audit_web_service(
         .map_err(|e| ScanError::NetworkError(format!("Failed to build HTTP client: {}", e)))?;
 
     // 1. Safe / Passive check (root path)
-    let root_res = client.get(&base_url)
+    let root_res = client
+        .get(&base_url)
         .send()
         .await
         .map_err(|e| ScanError::NetworkError(format!("Failed to fetch {}: {}", base_url, e)))?;
 
     let status_code = root_res.status().as_u16();
     let headers = root_res.headers().clone();
-    
-    let server_header = headers.get("Server").and_then(|v| v.to_str().ok()).map(String::from);
-    let powered_by_header = headers.get("X-Powered-By").and_then(|v| v.to_str().ok()).map(String::from);
+
+    let server_header = headers
+        .get("Server")
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
+    let powered_by_header = headers
+        .get("X-Powered-By")
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
 
     let body_text = root_res.text().await.unwrap_or_default();
     let title = extract_html_title(&body_text);
@@ -71,7 +78,7 @@ pub async fn audit_web_service(
     // 2. Aggressive checks
     if profile == WebAuditProfile::Aggressive {
         debug!("Running aggressive checks against {}", base_url);
-        
+
         let sensitive_paths = vec![
             "/.env",
             "/.git/config",
@@ -90,7 +97,9 @@ pub async fn audit_web_service(
                     // Quick heuristic: check if it's a soft-404 by comparing body length or seeing if it has standard 404 text
                     let text = res.text().await.unwrap_or_default();
                     let text_lower = text.to_lowercase();
-                    if !text_lower.contains("404 not found") && !text_lower.contains("page not found") {
+                    if !text_lower.contains("404 not found")
+                        && !text_lower.contains("page not found")
+                    {
                         // Very likely exposed
                         exposed_directories.push(path.to_string());
                     }

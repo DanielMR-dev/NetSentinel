@@ -1,7 +1,7 @@
 //! Settings-related commands.
 
 use std::path::PathBuf;
-use tracing::{info, error};
+use tracing::{error, info};
 
 use crate::error::ScanError;
 use crate::network::sanitize;
@@ -26,10 +26,16 @@ pub async fn get_settings_profiles() -> Result<Vec<SettingsProfile>, ScanError> 
     let manager = create_settings_manager()?;
     info!("[SETTINGS] SettingsManager created, loading profiles...");
     let container = manager.load_profiles().await?;
-    info!("[SETTINGS] Loaded {} profiles from disk", container.profiles.len());
+    info!(
+        "[SETTINGS] Loaded {} profiles from disk",
+        container.profiles.len()
+    );
 
     let profiles: Vec<SettingsProfile> = container.profiles.into_values().collect();
-    info!("[SETTINGS] Returning {} profiles to frontend", profiles.len());
+    info!(
+        "[SETTINGS] Returning {} profiles to frontend",
+        profiles.len()
+    );
     Ok(profiles)
 }
 
@@ -47,7 +53,9 @@ pub async fn save_profile(profile: SettingsProfile) -> Result<(), ScanError> {
     updated_profile.updated_at = chrono::Utc::now().timestamp();
 
     // Add or update the profile
-    container.profiles.insert(updated_profile.id.clone(), updated_profile);
+    container
+        .profiles
+        .insert(updated_profile.id.clone(), updated_profile);
 
     // If this is the first profile, make it the default and active
     if container.profiles.len() == 1 {
@@ -107,7 +115,10 @@ pub async fn load_settings() -> Result<SettingsProfile, ScanError> {
     info!("[SETTINGS] SettingsManager created, loading current settings...");
     let settings = manager.load_current_settings().await;
     match &settings {
-        Ok(profile) => info!("[SETTINGS] Loaded current settings: {} (id={})", profile.name, profile.id),
+        Ok(profile) => info!(
+            "[SETTINGS] Loaded current settings: {} (id={})",
+            profile.name, profile.id
+        ),
         Err(e) => error!("[SETTINGS] Failed to load current settings: {}", e),
     }
     settings

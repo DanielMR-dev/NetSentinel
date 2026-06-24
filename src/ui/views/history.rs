@@ -1,7 +1,7 @@
 //! History view — scan history table with expandable entries.
 
-use iced::{Alignment, Length};
 use iced::widget::{button, column, container, row, scrollable, text};
+use iced::{Alignment, Length};
 
 use crate::ui::theme::{self, TEXT, TEXT_MUTED};
 use crate::ui::widgets;
@@ -13,9 +13,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
 
     // ── Header with controls ────────────────────────────────────────────
     let mut header = row![
-        text("Scan History")
-            .color(TEXT)
-            .size(18),
+        text("Scan History").color(TEXT).size(18),
         iced::widget::horizontal_space().width(Length::Fill),
     ]
     .align_y(Alignment::Center)
@@ -49,12 +47,30 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         // Table header
         history_list = history_list.push(
             row![
-                text("Date").color(TEXT_MUTED).size(11).width(Length::FillPortion(2)),
-                text("CIDR").color(TEXT_MUTED).size(11).width(Length::FillPortion(2)),
-                text("Devices").color(TEXT_MUTED).size(11).width(Length::FillPortion(1)),
-                text("Duration").color(TEXT_MUTED).size(11).width(Length::FillPortion(1)),
-                text("Status").color(TEXT_MUTED).size(11).width(Length::FillPortion(1)),
-                text("").color(TEXT_MUTED).size(11).width(Length::FillPortion(1)),
+                text("Date")
+                    .color(TEXT_MUTED)
+                    .size(11)
+                    .width(Length::FillPortion(2)),
+                text("CIDR")
+                    .color(TEXT_MUTED)
+                    .size(11)
+                    .width(Length::FillPortion(2)),
+                text("Devices")
+                    .color(TEXT_MUTED)
+                    .size(11)
+                    .width(Length::FillPortion(1)),
+                text("Duration")
+                    .color(TEXT_MUTED)
+                    .size(11)
+                    .width(Length::FillPortion(1)),
+                text("Status")
+                    .color(TEXT_MUTED)
+                    .size(11)
+                    .width(Length::FillPortion(1)),
+                text("")
+                    .color(TEXT_MUTED)
+                    .size(11)
+                    .width(Length::FillPortion(1)),
             ]
             .spacing(8)
             .padding([4, 8])
@@ -75,7 +91,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
                     .size(10),
             )
             .padding([2, 6])
-                .style(theme::secondary_button)
+            .style(theme::secondary_button)
             .on_press(Message::HistoryEntryToggled(entry.id.clone()));
 
             let delete_btn = button(text("✕").color(TEXT_MUTED).size(10))
@@ -84,8 +100,14 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
                 .on_press(Message::DeleteHistoryEntry(entry.id.clone()));
 
             let entry_row = row![
-                text(date_str).color(TEXT).size(11).width(Length::FillPortion(2)),
-                text(&entry.cidr).color(TEXT).size(11).width(Length::FillPortion(2)),
+                text(date_str)
+                    .color(TEXT)
+                    .size(11)
+                    .width(Length::FillPortion(2)),
+                text(&entry.cidr)
+                    .color(TEXT)
+                    .size(11)
+                    .width(Length::FillPortion(2)),
                 text(format!("{}", entry.device_count))
                     .color(TEXT)
                     .size(11)
@@ -117,11 +139,8 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
                 );
 
                 if entry.devices.is_empty() {
-                    detail_col = detail_col.push(
-                        text("No devices in this scan.")
-                            .color(TEXT_MUTED)
-                            .size(11),
-                    );
+                    detail_col = detail_col
+                        .push(text("No devices in this scan.").color(TEXT_MUTED).size(11));
                 } else {
                     for device in &entry.devices {
                         let hostname = device.hostname.as_deref().unwrap_or("-");
@@ -147,18 +166,16 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         }
     }
 
-    let history_card = container(
-        scrollable(history_list).height(Length::Fill),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill);
+    let history_card = container(scrollable(history_list).height(Length::Fill))
+        .width(Length::Fill)
+        .height(Length::Fill);
 
     content = content.push(history_card);
 
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
-            .style(theme::app_background)
+        .style(theme::app_background)
         .into()
 }
 

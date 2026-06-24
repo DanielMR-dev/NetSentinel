@@ -72,9 +72,7 @@ impl RawTcpScanner {
         let interface = interfaces
             .into_iter()
             .find(|iface| {
-                iface.ips.iter().any(|ip| {
-                    ip.ip() == IpAddr::V4(src_ip)
-                }) && !iface.is_loopback()
+                iface.ips.iter().any(|ip| ip.ip() == IpAddr::V4(src_ip)) && !iface.is_loopback()
             })
             .ok_or_else(|| {
                 ScanError::NetworkError(format!(
@@ -100,15 +98,19 @@ impl RawTcpScanner {
     }
 
     /// Create a new raw TCP scanner resolved automatically for target_ip.
-    pub async fn new_for_target(target_ip: Ipv4Addr, scan_type: ScanType) -> Result<Self, ScanError> {
-        let (interface, src_ip) = Self::resolve_interface_and_ip(target_ip)
-            .await
-            .ok_or_else(|| {
-                ScanError::NetworkError(format!(
-                    "Failed to resolve network interface for target {}",
-                    target_ip
-                ))
-            })?;
+    pub async fn new_for_target(
+        target_ip: Ipv4Addr,
+        scan_type: ScanType,
+    ) -> Result<Self, ScanError> {
+        let (interface, src_ip) =
+            Self::resolve_interface_and_ip(target_ip)
+                .await
+                .ok_or_else(|| {
+                    ScanError::NetworkError(format!(
+                        "Failed to resolve network interface for target {}",
+                        target_ip
+                    ))
+                })?;
 
         let src_mac = interface.mac.unwrap_or(MacAddr::zero());
         let gateway_mac = MacAddr::broadcast();
@@ -154,7 +156,9 @@ impl RawTcpScanner {
                     }
                     for ip_net in &iface.ips {
                         if let IpAddr::V4(ipv4_addr) = ip_net.ip() {
-                            if let Ok(subnet) = ipnetwork::Ipv4Network::new(ipv4_addr, ip_net.prefix()) {
+                            if let Ok(subnet) =
+                                ipnetwork::Ipv4Network::new(ipv4_addr, ip_net.prefix())
+                            {
                                 if subnet.contains(gateway_ip) {
                                     return Some((iface.clone(), ipv4_addr));
                                 }
@@ -186,16 +190,15 @@ impl RawTcpScanner {
         dst_ip: Ipv4Addr,
         src_port: u16,
         dst_port: u16,
-    ) -> Vec<u8> {
+    ) -> Result<Vec<u8>, ScanError> {
         let mut buffer = vec![0u8; SYN_PACKET_SIZE];
 
         // Ethernet header
         {
             let mut eth = MutableEthernetPacket::new(&mut buffer[..ETHERNET_HEADER_SIZE])
-                .unwrap_or_else(|| {
-                    // This should never happen with a properly sized buffer
-                    panic!("Buffer too small for Ethernet header")
-                });
+                .ok_or_else(|| {
+                    ScanError::PacketError("Buffer too small for Ethernet header".to_string())
+                })?;
             eth.set_destination(self.gateway_mac);
             eth.set_source(self.src_mac);
             eth.set_ethertype(EtherTypes::Ipv4);
@@ -206,7 +209,9 @@ impl RawTcpScanner {
             let mut ipv4 = MutableIpv4Packet::new(
                 &mut buffer[ETHERNET_HEADER_SIZE..ETHERNET_HEADER_SIZE + IPV4_HEADER_SIZE],
             )
-            .unwrap_or_else(|| panic!("Buffer too small for IPv4 header"));
+            .ok_or_else(|| {
+                ScanError::PacketError("Buffer too small for IPv4 header".to_string())
+            })?;
 
             ipv4.set_version(4);
             ipv4.set_header_length(5);
@@ -226,10 +231,11 @@ impl RawTcpScanner {
 
         // TCP header
         {
-            let mut tcp = MutableTcpPacket::new(
-                &mut buffer[ETHERNET_HEADER_SIZE + IPV4_HEADER_SIZE..],
-            )
-            .unwrap_or_else(|| panic!("Buffer too small for TCP header"));
+            let mut tcp =
+                MutableTcpPacket::new(&mut buffer[ETHERNET_HEADER_SIZE + IPV4_HEADER_SIZE..])
+                    .ok_or_else(|| {
+                        ScanError::PacketError("Buffer too small for TCP header".to_string())
+                    })?;
 
             tcp.set_source(src_port);
             tcp.set_destination(dst_port);
@@ -254,7 +260,7 @@ impl RawTcpScanner {
             tcp.set_checksum(checksum);
         }
 
-        buffer
+        Ok(buffer)
     }
 
     /// Craft a TCP RST packet to abort the handshake.
@@ -264,13 +270,15 @@ impl RawTcpScanner {
         src_port: u16,
         dst_port: u16,
         seq_num: u32,
-    ) -> Vec<u8> {
+    ) -> Result<Vec<u8>, ScanError> {
         let mut buffer = vec![0u8; SYN_PACKET_SIZE];
 
         // Ethernet header
         {
             let mut eth = MutableEthernetPacket::new(&mut buffer[..ETHERNET_HEADER_SIZE])
-                .unwrap_or_else(|| panic!("Buffer too small for Ethernet header"));
+                .ok_or_else(|| {
+                    ScanError::PacketError("Buffer too small for Ethernet header".to_string())
+                })?;
             eth.set_destination(self.gateway_mac);
             eth.set_source(self.src_mac);
             eth.set_ethertype(EtherTypes::Ipv4);
@@ -281,7 +289,9 @@ impl RawTcpScanner {
             let mut ipv4 = MutableIpv4Packet::new(
                 &mut buffer[ETHERNET_HEADER_SIZE..ETHERNET_HEADER_SIZE + IPV4_HEADER_SIZE],
             )
-            .unwrap_or_else(|| panic!("Buffer too small for IPv4 header"));
+            .ok_or_else(|| {
+                ScanError::PacketError("Buffer too small for IPv4 header".to_string())
+            })?;
 
             ipv4.set_version(4);
             ipv4.set_header_length(5);
@@ -300,10 +310,11 @@ impl RawTcpScanner {
 
         // TCP header (RST)
         {
-            let mut tcp = MutableTcpPacket::new(
-                &mut buffer[ETHERNET_HEADER_SIZE + IPV4_HEADER_SIZE..],
-            )
-            .unwrap_or_else(|| panic!("Buffer too small for TCP header"));
+            let mut tcp =
+                MutableTcpPacket::new(&mut buffer[ETHERNET_HEADER_SIZE + IPV4_HEADER_SIZE..])
+                    .ok_or_else(|| {
+                        ScanError::PacketError("Buffer too small for TCP header".to_string())
+                    })?;
 
             tcp.set_source(src_port);
             tcp.set_destination(dst_port);
@@ -318,7 +329,7 @@ impl RawTcpScanner {
             tcp.set_checksum(checksum);
         }
 
-        buffer
+        Ok(buffer)
     }
 
     /// Scan a single port using SYN scanning (blocking).
@@ -352,17 +363,14 @@ impl RawTcpScanner {
         })?;
 
         // Craft and send TCP packet
-        let tcp_packet = self.craft_tcp_packet(target_ip, src_port, target_port);
+        let tcp_packet = self.craft_tcp_packet(target_ip, src_port, target_port)?;
 
         // For raw IP sockets, we skip the Ethernet header and let the kernel handle routing
         let ip_packet = &tcp_packet[ETHERNET_HEADER_SIZE..];
 
         let dest = std::net::SocketAddrV4::new(target_ip, 0);
         send_socket
-            .send_to(
-                ip_packet,
-                &socket2::SockAddr::from(dest),
-            )
+            .send_to(ip_packet, &socket2::SockAddr::from(dest))
             .map_err(|e| {
                 ScanError::NetworkError(format!(
                     "Failed to send SYN packet to {}:{}: {}",
@@ -376,16 +384,15 @@ impl RawTcpScanner {
             socket2::Type::RAW,
             Some(socket2::Protocol::TCP),
         )
-        .map_err(|e| {
-            ScanError::NetworkError(format!("Failed to create receive socket: {}", e))
-        })?;
+        .map_err(|e| ScanError::NetworkError(format!("Failed to create receive socket: {}", e)))?;
 
         recv_socket.set_read_timeout(Some(timeout)).map_err(|e| {
             ScanError::NetworkError(format!("Failed to set receive timeout: {}", e))
         })?;
 
         // Listen for response
-        let mut recv_buf: Vec<std::mem::MaybeUninit<u8>> = vec![std::mem::MaybeUninit::uninit(); RECV_BUF_SIZE];
+        let mut recv_buf: Vec<std::mem::MaybeUninit<u8>> =
+            vec![std::mem::MaybeUninit::uninit(); RECV_BUF_SIZE];
         let deadline = Instant::now() + timeout;
 
         loop {
@@ -406,10 +413,17 @@ impl RawTcpScanner {
                         continue;
                     }
 
-                    // SAFETY: recv returned Ok(size), so the first `size` bytes are initialized
-                    let recv_bytes = unsafe {
-                        std::slice::from_raw_parts(recv_buf[0].as_ptr(), size)
-                    };
+                    // Defensive validation: recv should never return more than the buffer
+                    // length, but we explicitly guard the unsafe slice construction.
+                    if size > recv_buf.len() {
+                        continue;
+                    }
+
+                    // SAFETY: `recv` returned `Ok(size)`, so the first `size` bytes of
+                    // `recv_buf` have been initialized by the kernel. We verified that
+                    // `size <= recv_buf.len()`, so the slice is in bounds.
+                    let recv_bytes =
+                        unsafe { std::slice::from_raw_parts(recv_buf[0].as_ptr(), size) };
 
                     // Parse IP header
                     if let Some(ipv4) = Ipv4Packet::new(recv_bytes) {
@@ -438,19 +452,21 @@ impl RawTcpScanner {
                             let flags = tcp.get_flags();
 
                             // SYN-ACK received → port is open (for SYN scan)
-                            if matches!(self.scan_type, ScanType::Syn) && flags & TcpFlags::SYN != 0 && flags & TcpFlags::ACK != 0 {
+                            if matches!(self.scan_type, ScanType::Syn)
+                                && flags & TcpFlags::SYN != 0
+                                && flags & TcpFlags::ACK != 0
+                            {
                                 // Send RST to abort the handshake
-                                let rst_packet = self.craft_rst_packet(
+                                if let Ok(rst_packet) = self.craft_rst_packet(
                                     target_ip,
                                     src_port,
                                     target_port,
                                     tcp.get_acknowledgement(),
-                                );
-                                let rst_ip = &rst_packet[ETHERNET_HEADER_SIZE..];
-                                let _ = send_socket.send_to(
-                                    rst_ip,
-                                    &socket2::SockAddr::from(dest),
-                                );
+                                ) {
+                                    let rst_ip = &rst_packet[ETHERNET_HEADER_SIZE..];
+                                    let _ =
+                                        send_socket.send_to(rst_ip, &socket2::SockAddr::from(dest));
+                                }
 
                                 return Ok((PortState::Open, Some(ipv4.get_ttl())));
                             }
@@ -515,20 +531,17 @@ impl RawTcpScanner {
 
                     // Spawn blocking SYN scan
                     let result = tokio::task::spawn_blocking(move || {
+                        let interface = datalink::interfaces()
+                            .into_iter()
+                            .find(|i| i.name == scanner_iface_name)
+                            .ok_or_else(|| {
+                                ScanError::NoInterfaceForIp(scanner_iface_name.clone())
+                            })?;
+
                         let scanner = RawTcpScanner {
                             scan_type: scanner_type,
                             src_ip: scanner_ip,
-                            interface: datalink::interfaces()
-                                .into_iter()
-                                .find(|i| i.name == scanner_iface_name)
-                                .unwrap_or_else(|| {
-                                    datalink::interfaces()
-                                        .into_iter()
-                                        .next()
-                                        .unwrap_or_else(|| {
-                                            panic!("No network interface available")
-                                        })
-                                    }),
+                            interface,
                             src_mac: scanner_src_mac,
                             gateway_mac: scanner_gw_mac,
                         };
@@ -538,8 +551,19 @@ impl RawTcpScanner {
 
                     let (state, ttl) = match result {
                         Ok(Ok((state, ttl))) => (state, ttl),
-                        Ok(Err(_)) => (PortState::Filtered, None),
-                        Err(_) => (PortState::Filtered, None),
+                        Ok(Err(e)) => {
+                            tracing::warn!("Raw TCP scan failed for {}:{}: {}", target_ip, port, e);
+                            (PortState::Filtered, None)
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Raw TCP scan task panicked for {}:{}: {}",
+                                target_ip,
+                                port,
+                                e
+                            );
+                            (PortState::Filtered, None)
+                        }
                     };
 
                     (port, state, ttl)

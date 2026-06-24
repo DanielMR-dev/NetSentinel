@@ -1,7 +1,7 @@
 //! Baseline view — create form, baseline list, diff view.
 
-use iced::{Alignment, Length};
 use iced::widget::{button, column, container, row, scrollable, text, text_input};
+use iced::{Alignment, Length};
 
 use crate::ui::theme::{self, TEXT, TEXT_MUTED};
 use crate::ui::widgets;
@@ -31,18 +31,12 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         Some("Create Baseline from Current Scan"),
         column![
             row![
-                column![
-                    text("Name").color(TEXT_MUTED).size(11),
-                    name_input,
-                ]
-                .spacing(2)
-                .width(Length::FillPortion(1)),
-                column![
-                    text("Description").color(TEXT_MUTED).size(11),
-                    desc_input,
-                ]
-                .spacing(2)
-                .width(Length::FillPortion(2)),
+                column![text("Name").color(TEXT_MUTED).size(11), name_input,]
+                    .spacing(2)
+                    .width(Length::FillPortion(1)),
+                column![text("Description").color(TEXT_MUTED).size(11), desc_input,]
+                    .spacing(2)
+                    .width(Length::FillPortion(2)),
             ]
             .spacing(12)
             .align_y(Alignment::End),
@@ -66,11 +60,26 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         // Header
         baseline_list = baseline_list.push(
             row![
-                text("Name").color(TEXT_MUTED).size(11).width(Length::FillPortion(2)),
-                text("CIDR").color(TEXT_MUTED).size(11).width(Length::FillPortion(2)),
-                text("Devices").color(TEXT_MUTED).size(11).width(Length::FillPortion(1)),
-                text("Created").color(TEXT_MUTED).size(11).width(Length::FillPortion(2)),
-                text("Actions").color(TEXT_MUTED).size(11).width(Length::FillPortion(2)),
+                text("Name")
+                    .color(TEXT_MUTED)
+                    .size(11)
+                    .width(Length::FillPortion(2)),
+                text("CIDR")
+                    .color(TEXT_MUTED)
+                    .size(11)
+                    .width(Length::FillPortion(2)),
+                text("Devices")
+                    .color(TEXT_MUTED)
+                    .size(11)
+                    .width(Length::FillPortion(1)),
+                text("Created")
+                    .color(TEXT_MUTED)
+                    .size(11)
+                    .width(Length::FillPortion(2)),
+                text("Actions")
+                    .color(TEXT_MUTED)
+                    .size(11)
+                    .width(Length::FillPortion(2)),
             ]
             .spacing(8)
             .padding([4, 8])
@@ -92,8 +101,14 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
                 .on_press(Message::DeleteBaseline(baseline.id.clone()));
 
             let baseline_row = row![
-                text(&baseline.name).color(TEXT).size(11).width(Length::FillPortion(2)),
-                text(&baseline.scan_cidr).color(TEXT).size(11).width(Length::FillPortion(2)),
+                text(&baseline.name)
+                    .color(TEXT)
+                    .size(11)
+                    .width(Length::FillPortion(2)),
+                text(&baseline.scan_cidr)
+                    .color(TEXT)
+                    .size(11)
+                    .width(Length::FillPortion(2)),
                 text(format!("{}", device_count))
                     .color(TEXT)
                     .size(11)
@@ -151,9 +166,13 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
             let mut new_hosts_col = column![].spacing(2);
             for device in &diff.new_hosts {
                 new_hosts_col = new_hosts_col.push(
-                    text(format!("+ {} ({})", device.ip, device.hostname.as_deref().unwrap_or("-")))
-                        .color(crate::ui::theme::SUCCESS)
-                        .size(12),
+                    text(format!(
+                        "+ {} ({})",
+                        device.ip,
+                        device.hostname.as_deref().unwrap_or("-")
+                    ))
+                    .color(crate::ui::theme::SUCCESS)
+                    .size(12),
                 );
             }
             diff_col = diff_col.push(widgets::card(
@@ -167,9 +186,13 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
             let mut removed_col = column![].spacing(2);
             for device in &diff.removed_hosts {
                 removed_col = removed_col.push(
-                    text(format!("- {} ({})", device.ip, device.hostname.as_deref().unwrap_or("-")))
-                        .color(crate::ui::theme::DANGER)
-                        .size(12),
+                    text(format!(
+                        "- {} ({})",
+                        device.ip,
+                        device.hostname.as_deref().unwrap_or("-")
+                    ))
+                    .color(crate::ui::theme::DANGER)
+                    .size(12),
                 );
             }
             diff_col = diff_col.push(widgets::card(
@@ -210,7 +233,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
-            .style(theme::app_background)
+        .style(theme::app_background)
         .into()
 }
 

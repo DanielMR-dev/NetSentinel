@@ -171,7 +171,8 @@ mod tests {
 
     #[test]
     fn test_parse_arp_line_valid() {
-        let line = "192.168.1.1          0x1         0x2         00:11:22:33:44:55     *        eth0";
+        let line =
+            "192.168.1.1          0x1         0x2         00:11:22:33:44:55     *        eth0";
         let device = parse_arp_line(line);
         assert!(device.is_some());
         let device = device.unwrap();
@@ -182,13 +183,15 @@ mod tests {
 
     #[test]
     fn test_parse_arp_line_incomplete_flags() {
-        let line = "192.168.1.1          0x1         0x0         00:00:00:00:00:00     *        eth0";
+        let line =
+            "192.168.1.1          0x1         0x0         00:00:00:00:00:00     *        eth0";
         assert!(parse_arp_line(line).is_none());
     }
 
     #[test]
     fn test_parse_arp_line_zero_mac() {
-        let line = "192.168.1.1          0x1         0x2         00:00:00:00:00:00     *        eth0";
+        let line =
+            "192.168.1.1          0x1         0x2         00:00:00:00:00:00     *        eth0";
         assert!(parse_arp_line(line).is_none());
     }
 

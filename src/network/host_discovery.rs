@@ -22,8 +22,7 @@ const PROGRESS_INTERVAL: u32 = 10;
 
 /// Common ports to scan if none specified
 pub const DEFAULT_PORTS: &[u16] = &[
-    21, 22, 23, 25, 53, 80, 110, 143, 443, 445, 993, 995,
-    3306, 3389, 5432, 5900, 6379, 8080, 8443,
+    21, 22, 23, 25, 53, 80, 110, 143, 443, 445, 993, 995, 3306, 3389, 5432, 5900, 6379, 8080, 8443,
 ];
 
 /// Emit a scan_log event to the frontend via the event channel.
@@ -205,9 +204,7 @@ pub async fn reverse_dns_lookup(ip: &str) -> Option<String> {
     let ip_owned = ip.to_string();
     let timeout = std::time::Duration::from_secs(2);
 
-    let lookup = tokio::task::spawn_blocking(move || {
-        reverse_dns_lookup_blocking(&ip_owned)
-    });
+    let lookup = tokio::task::spawn_blocking(move || reverse_dns_lookup_blocking(&ip_owned));
 
     match tokio::time::timeout(timeout, lookup).await {
         Ok(Ok(result)) => result,
@@ -330,11 +327,7 @@ async fn probe_port(ip: IpAddr, port: u16, timeout_ms: u64) -> bool {
 }
 
 /// Scan ports on a discovered host
-pub async fn scan_ports(
-    ip: IpAddr,
-    ports: &[u16],
-    timeout_ms: u64,
-) -> Vec<Port> {
+pub async fn scan_ports(ip: IpAddr, ports: &[u16], timeout_ms: u64) -> Vec<Port> {
     let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_PORTS));
 
     stream::iter(ports.to_vec())

@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use pnet::datalink::{self, NetworkInterface};
-use pnet::packet::Packet;
 use pnet::packet::arp::{ArpHardwareTypes, ArpOperations, ArpPacket, MutableArpPacket};
 use pnet::packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};
+use pnet::packet::Packet;
 use pnet::util::MacAddr;
 
 use crate::error::ScanError;
@@ -19,13 +19,14 @@ fn craft_arp_request(
     src_mac: MacAddr,
     src_ip: Ipv4Addr,
     target_ip: Ipv4Addr,
-) -> [u8; 42] {
+) -> Result<[u8; 42], ScanError> {
     let mut buf = [0u8; 42];
 
     // Ethernet header (14 bytes)
     {
-        let mut eth = MutableEthernetPacket::new(&mut buf[..14])
-            .unwrap_or_else(|| panic!("Buffer too small for Ethernet header"));
+        let mut eth = MutableEthernetPacket::new(&mut buf[..14]).ok_or_else(|| {
+            ScanError::PacketError("Buffer too small for Ethernet header".to_string())
+        })?;
         eth.set_destination(MacAddr::broadcast());
         eth.set_source(src_mac);
         eth.set_ethertype(EtherTypes::Arp);
@@ -34,7 +35,7 @@ fn craft_arp_request(
     // ARP header (28 bytes)
     {
         let mut arp = MutableArpPacket::new(&mut buf[14..])
-            .unwrap_or_else(|| panic!("Buffer too small for ARP header"));
+            .ok_or_else(|| ScanError::PacketError("Buffer too small for ARP header".to_string()))?;
         arp.set_hardware_type(ArpHardwareTypes::Ethernet);
         arp.set_protocol_type(EtherTypes::Ipv4);
         arp.set_hw_addr_len(6);
@@ -46,7 +47,7 @@ fn craft_arp_request(
         arp.set_target_proto_addr(target_ip);
     }
 
-    buf
+    Ok(buf)
 }
 
 /// Perform an active ARP sweep on the local network interface.
@@ -69,8 +70,17 @@ pub async fn arp_sweep(
     // Open datalink channel
     let (mut tx, mut rx) = match datalink::channel(&interface, config) {
         Ok(datalink::Channel::Ethernet(tx, rx)) => (tx, rx),
-        Ok(_) => return Err(ScanError::NetworkError("Unsupported channel type".to_string())),
-        Err(e) => return Err(ScanError::NetworkError(format!("Failed to open datalink channel: {}", e))),
+        Ok(_) => {
+            return Err(ScanError::NetworkError(
+                "Unsupported channel type".to_string(),
+            ))
+        }
+        Err(e) => {
+            return Err(ScanError::NetworkError(format!(
+                "Failed to open datalink channel: {}",
+                e
+            )))
+        }
     };
 
     let running_clone = running.clone();
@@ -90,8 +100,9 @@ pub async fn arp_sweep(
                                 if arp.get_operation() == ArpOperations::Reply {
                                     let ip = arp.get_sender_proto_addr();
                                     let mac = arp.get_sender_hw_addr();
-                                    let mut map = discovered_clone.lock().unwrap();
-                                    map.insert(ip, mac);
+                                    if let Ok(mut map) = discovered_clone.lock() {
+                                        map.insert(ip, mac);
+                                    }
                                 }
                             }
                         }
@@ -107,54 +118,89 @@ pub async fn arp_sweep(
         }
     });
 
-    // Send ARP requests using spawn_blocking to avoid blocking the Tokio executor
-    let state_for_send = state.clone();
-    let ips_clone = ips.clone();
-    
-    let send_task = tokio::task::spawn_blocking(move || {
-        for target_ip in ips_clone.iter() {
-            if !state_for_send.is_running() {
-                break;
-            }
+    // Send ARP requests from an async loop with Tokio sleeps, delegating the
+    // actual datalink transmission to a dedicated blocking task. This keeps the
+    // async runtime responsive while controlling the packet rate.
+    let (packet_tx, packet_rx) = std::sync::mpsc::channel::<Vec<u8>>();
 
-            let packet = craft_arp_request(src_mac, src_ip, *target_ip);
+    let send_task = tokio::task::spawn_blocking(move || {
+        while let Ok(packet) = packet_rx.recv() {
             if let Some(send_res) = tx.send_to(&packet, None) {
                 if let Err(e) = send_res {
-                    tracing::warn!("Failed to send ARP request for {}: {}", target_ip, e);
+                    tracing::warn!("Failed to send ARP request: {}", e);
                 }
             }
-
-            // Small inter-packet delay to prevent flooding (e.g. 1ms)
-            std::thread::sleep(Duration::from_millis(1));
         }
     });
 
+    for target_ip in ips.iter() {
+        if !state.is_running() {
+            break;
+        }
+
+        let packet = match craft_arp_request(src_mac, src_ip, *target_ip) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("Failed to craft ARP request for {}: {}", target_ip, e);
+                continue;
+            }
+        };
+
+        if packet_tx.send(packet.to_vec()).is_err() {
+            break;
+        }
+
+        // Small inter-packet delay to prevent flooding
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+
+    drop(packet_tx);
     let _ = send_task.await;
 
     // Wait for final replies to arrive
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline && state.is_running() {
-        std::thread::sleep(Duration::from_millis(50));
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
-    // Stop receiver thread
+    // Signal the receiver thread to stop
     running.store(false, Ordering::Relaxed);
-    let _ = rx_thread.join();
+
+    // Offload the blocking join to Tokio's dedicated blocking thread pool.
+    // This keeps async workers free while we wait for the capture thread to exit.
+    match tokio::task::spawn_blocking(move || rx_thread.join()).await {
+        Ok(Ok(())) => {
+            // Receiver thread exited cleanly.
+        }
+        Ok(Err(panic_payload)) => {
+            // The receiver thread panicked — extract a human-readable message.
+            let msg = panic_payload
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| panic_payload.downcast_ref::<String>().map(|s| s.as_str()))
+                .unwrap_or("<non-string panic payload>");
+            tracing::warn!("ARP receiver thread panicked: {msg}");
+        }
+        Err(join_error) => {
+            tracing::warn!("spawn_blocking task for ARP receiver join was cancelled: {join_error}");
+        }
+    }
 
     // Collect discovered devices
-    let mut map = discovered.lock().unwrap();
-    
-    // Add local host if it is in the target IP list and not already found
-    if ips.contains(&src_ip) && !map.contains_key(&src_ip) {
-        map.insert(src_ip, src_mac);
-    }
-
     let mut devices = Vec::new();
-    for (ip, mac) in map.iter() {
-        let mut dev = Device::new(ip.to_string());
-        dev.mac = mac.to_string();
-        dev.status = DeviceStatus::Online;
-        devices.push(dev);
+
+    if let Ok(mut map) = discovered.lock() {
+        // Add local host if it is in the target IP list and not already found
+        if ips.contains(&src_ip) && !map.contains_key(&src_ip) {
+            map.insert(src_ip, src_mac);
+        }
+
+        for (ip, mac) in map.iter() {
+            let mut dev = Device::new(ip.to_string());
+            dev.mac = mac.to_string();
+            dev.status = DeviceStatus::Online;
+            devices.push(dev);
+        }
     }
 
     Ok(devices)

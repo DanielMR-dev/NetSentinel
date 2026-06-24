@@ -7,28 +7,28 @@ pub mod commands;
 pub mod error;
 pub mod events;
 pub mod history;
+pub mod ipc;
 pub mod network;
+pub mod reporting;
 pub mod settings;
 pub mod state;
 pub mod types;
 pub mod ui;
-pub mod ipc;
-pub mod reporting;
 
 // ── Re-exports for convenient access ────────────────────────────────────
 
 pub use commands::{
-    baseline::{save_baseline, get_baselines, delete_baseline, compare_baseline},
+    baseline::{compare_baseline, delete_baseline, get_baselines, save_baseline},
     device::get_device_info,
     export::export_audit_report,
-    history::{save_scan_history, get_scan_history, delete_scan_history_entry, clear_scan_history},
+    history::{clear_scan_history, delete_scan_history_entry, get_scan_history, save_scan_history},
     network::get_network_info,
     platform::get_platform_capabilities,
     privilege::check_privilege_status,
-    scan::{start_scan, stop_scan, pause_scan, resume_scan, get_scan_results},
+    scan::{get_scan_results, pause_scan, resume_scan, start_scan, stop_scan},
     settings::{
-        get_settings_profiles, save_profile, delete_profile, load_settings, save_settings,
-        get_default_settings,
+        delete_profile, get_default_settings, get_settings_profiles, load_settings, save_profile,
+        save_settings,
     },
     DeviceInfo, NetworkInfo,
 };

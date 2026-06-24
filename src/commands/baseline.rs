@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::baseline::{Baseline, BaselineDiff, BaselineStore, compute_diff};
+use crate::baseline::{compute_diff, Baseline, BaselineDiff, BaselineStore};
 use crate::commands::settings::get_config_dir;
 use crate::error::ScanError;
 use crate::network::sanitize;

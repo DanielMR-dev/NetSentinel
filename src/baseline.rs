@@ -92,7 +92,7 @@ impl BaselineStore {
             );",
         )
         .map_err(|e| {
-            ScanError::NetworkError(format!("Failed to initialize baseline schema: {}", e))
+            ScanError::BaselineError(format!("Failed to initialize baseline schema: {}", e))
         })?;
         Ok(())
     }
@@ -102,15 +102,12 @@ impl BaselineStore {
         // Ensure parent directory exists
         if let Some(parent) = self.db_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                ScanError::NetworkError(format!(
-                    "Failed to create baseline directory: {}",
-                    e
-                ))
+                ScanError::BaselineError(format!("Failed to create baseline directory: {}", e))
             })?;
         }
 
         let conn = Connection::open(&self.db_path).map_err(|e| {
-            ScanError::NetworkError(format!("Failed to open baseline database: {}", e))
+            ScanError::BaselineError(format!("Failed to open baseline database: {}", e))
         })?;
 
         Self::init_schema(&conn)?;
@@ -124,7 +121,7 @@ impl BaselineStore {
         let conn = self.open_connection()?;
 
         let devices_json = serde_json::to_string(&baseline.devices).map_err(|e| {
-            ScanError::NetworkError(format!("Failed to serialize baseline devices: {}", e))
+            ScanError::SerializationError(format!("Failed to serialize baseline devices: {}", e))
         })?;
 
         conn.execute(
@@ -165,24 +162,27 @@ impl BaselineStore {
                 let devices_json: String = row.get(4)?;
                 let created_at: i64 = row.get(5)?;
 
-                Ok((id, name, description, scan_cidr, devices_json, created_at))
-            })
-            .map_err(|e| {
-                ScanError::NetworkError(format!("Failed to query baselines: {}", e))
-            })?
-            .filter_map(|r| r.ok())
-            .map(|(id, name, description, scan_cidr, devices_json, created_at)| {
-                let devices: Vec<Device> =
-                    serde_json::from_str(&devices_json).unwrap_or_default();
-                Baseline {
+                let devices: Vec<Device> = serde_json::from_str(&devices_json).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        4,
+                        rusqlite::types::Type::Text,
+                        Box::new(ScanError::DeserializationError(format!(
+                            "Failed to deserialize baseline devices: {}",
+                            e
+                        ))),
+                    )
+                })?;
+                Ok(Baseline {
                     id,
                     name,
                     description,
                     devices,
                     scan_cidr,
                     created_at,
-                }
+                })
             })
+            .map_err(|e| ScanError::BaselineError(format!("Failed to query baselines: {}", e)))?
+            .filter_map(|r| r.ok())
             .collect();
 
         Ok(baselines)
@@ -194,12 +194,10 @@ impl BaselineStore {
 
         let rows = conn
             .execute("DELETE FROM baselines WHERE id = ?1", params![id])
-            .map_err(|e| {
-                ScanError::NetworkError(format!("Failed to delete baseline: {}", e))
-            })?;
+            .map_err(|e| ScanError::NetworkError(format!("Failed to delete baseline: {}", e)))?;
 
         if rows == 0 {
-            return Err(ScanError::NetworkError(format!(
+            return Err(ScanError::BaselineNotFound(format!(
                 "Baseline with ID '{}' not found",
                 id
             )));
@@ -218,7 +216,7 @@ impl BaselineStore {
                 ScanError::NetworkError(format!("Failed to prepare baseline query: {}", e))
             })?;
 
-        let result = stmt
+        let baseline = stmt
             .query_row(params![id], |row| {
                 let id: String = row.get(0)?;
                 let name: String = row.get(1)?;
@@ -227,24 +225,33 @@ impl BaselineStore {
                 let devices_json: String = row.get(4)?;
                 let created_at: i64 = row.get(5)?;
 
-                Ok((id, name, description, scan_cidr, devices_json, created_at))
+                let devices: Vec<Device> = serde_json::from_str(&devices_json).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        4,
+                        rusqlite::types::Type::Text,
+                        Box::new(ScanError::DeserializationError(format!(
+                            "Failed to deserialize baseline devices: {}",
+                            e
+                        ))),
+                    )
+                })?;
+                Ok(Baseline {
+                    id,
+                    name,
+                    description,
+                    devices,
+                    scan_cidr,
+                    created_at,
+                })
             })
-            .map_err(|e| {
-                ScanError::NetworkError(format!("Failed to get baseline '{}': {}", id, e))
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    ScanError::BaselineNotFound(format!("Baseline with ID '{}' not found", id))
+                }
+                _ => ScanError::BaselineError(format!("Failed to get baseline '{}': {}", id, e)),
             })?;
 
-        let (id, name, description, scan_cidr, devices_json, created_at) = result;
-        let devices: Vec<Device> =
-            serde_json::from_str(&devices_json).unwrap_or_default();
-
-        Ok(Baseline {
-            id,
-            name,
-            description,
-            devices,
-            scan_cidr,
-            created_at,
-        })
+        Ok(baseline)
     }
 }
 
@@ -262,10 +269,8 @@ pub fn compute_diff(baseline: &Baseline, current_devices: &[Device]) -> Baseline
         .map(|d| (d.ip.as_str(), d))
         .collect();
 
-    let current_map: HashMap<&str, &Device> = current_devices
-        .iter()
-        .map(|d| (d.ip.as_str(), d))
-        .collect();
+    let current_map: HashMap<&str, &Device> =
+        current_devices.iter().map(|d| (d.ip.as_str(), d)).collect();
 
     // Find new hosts
     let new_hosts: Vec<Device> = current_devices
@@ -368,6 +373,8 @@ mod tests {
             ports,
             last_seen: 1000,
             banner_results: Vec::new(),
+            active_checks: Vec::new(),
+            web_audits: Vec::new(),
         }
     }
 
@@ -382,9 +389,10 @@ mod tests {
 
     #[test]
     fn test_compute_diff_no_changes() {
-        let devices = vec![
-            make_device("192.168.1.1", vec![make_port(80, PortState::Open)]),
-        ];
+        let devices = vec![make_device(
+            "192.168.1.1",
+            vec![make_port(80, PortState::Open)],
+        )];
 
         let baseline = Baseline {
             id: "test".to_string(),
@@ -403,9 +411,10 @@ mod tests {
 
     #[test]
     fn test_compute_diff_new_host() {
-        let baseline_devices = vec![
-            make_device("192.168.1.1", vec![make_port(80, PortState::Open)]),
-        ];
+        let baseline_devices = vec![make_device(
+            "192.168.1.1",
+            vec![make_port(80, PortState::Open)],
+        )];
         let current_devices = vec![
             make_device("192.168.1.1", vec![make_port(80, PortState::Open)]),
             make_device("192.168.1.2", vec![make_port(22, PortState::Open)]),
@@ -432,9 +441,10 @@ mod tests {
             make_device("192.168.1.1", vec![make_port(80, PortState::Open)]),
             make_device("192.168.1.2", vec![make_port(22, PortState::Open)]),
         ];
-        let current_devices = vec![
-            make_device("192.168.1.1", vec![make_port(80, PortState::Open)]),
-        ];
+        let current_devices = vec![make_device(
+            "192.168.1.1",
+            vec![make_port(80, PortState::Open)],
+        )];
 
         let baseline = Baseline {
             id: "test".to_string(),
@@ -453,12 +463,14 @@ mod tests {
 
     #[test]
     fn test_compute_diff_port_changed() {
-        let baseline_devices = vec![
-            make_device("192.168.1.1", vec![make_port(80, PortState::Open)]),
-        ];
-        let current_devices = vec![
-            make_device("192.168.1.1", vec![make_port(80, PortState::Closed)]),
-        ];
+        let baseline_devices = vec![make_device(
+            "192.168.1.1",
+            vec![make_port(80, PortState::Open)],
+        )];
+        let current_devices = vec![make_device(
+            "192.168.1.1",
+            vec![make_port(80, PortState::Closed)],
+        )];
 
         let baseline = Baseline {
             id: "test".to_string(),
@@ -484,9 +496,10 @@ mod tests {
             id: "test-id".to_string(),
             name: "Test Baseline".to_string(),
             description: Some("A test baseline".to_string()),
-            devices: vec![
-                make_device("192.168.1.1", vec![make_port(80, PortState::Open)]),
-            ],
+            devices: vec![make_device(
+                "192.168.1.1",
+                vec![make_port(80, PortState::Open)],
+            )],
             scan_cidr: "192.168.1.0/24".to_string(),
             created_at: 1000,
         };

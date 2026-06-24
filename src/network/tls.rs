@@ -65,29 +65,23 @@ pub const TLS_PORTS: &[u16] = &[
 /// Returns [`ScanError::Timeout`] if the connection or handshake exceeds the timeout.
 /// Returns [`ScanError::NetworkError`] for connection failures, missing certificates,
 /// or X509 parsing errors.
-pub async fn analyze_tls(
-    ip: &str,
-    port: u16,
-    timeout: Duration,
-) -> Result<TlsInfo, ScanError> {
+pub async fn analyze_tls(ip: &str, port: u16, timeout: Duration) -> Result<TlsInfo, ScanError> {
     let addr = format!("{}:{}", ip, port);
 
     // 1. TCP connect with timeout
     let tcp_stream = tokio::time::timeout(timeout, TcpStream::connect(&addr))
         .await
         .map_err(|_| ScanError::Timeout)?
-        .map_err(|e| {
-            ScanError::NetworkError(format!("TCP connect to {} failed: {}", addr, e))
-        })?;
+        .map_err(|e| ScanError::NetworkError(format!("TCP connect to {} failed: {}", addr, e)))?;
 
     // 2. Build TLS connector that accepts invalid certs (for analysis, not validation)
     let mut builder = native_tls::TlsConnector::builder();
     builder.danger_accept_invalid_certs(true);
     builder.danger_accept_invalid_hostnames(true);
 
-    let native_connector = builder.build().map_err(|e| {
-        ScanError::NetworkError(format!("Failed to build TLS connector: {}", e))
-    })?;
+    let native_connector = builder
+        .build()
+        .map_err(|e| ScanError::NetworkError(format!("Failed to build TLS connector: {}", e)))?;
 
     let connector = TlsConnector::from(native_connector);
 
@@ -122,9 +116,8 @@ pub async fn analyze_tls(
     })?;
 
     // 7. Parse X509 certificate
-    let (_, x509) = X509Certificate::from_der(&der).map_err(|e| {
-        ScanError::NetworkError(format!("Failed to parse X509 certificate: {}", e))
-    })?;
+    let (_, x509) = X509Certificate::from_der(&der)
+        .map_err(|e| ScanError::NetworkError(format!("Failed to parse X509 certificate: {}", e)))?;
 
     // 8. Extract certificate fields
     let issuer = x509.issuer().to_string();
@@ -163,9 +156,7 @@ pub async fn analyze_tls(
 /// through its stable public API. On Linux (OpenSSL backend), we attempt to
 /// access the underlying `openssl::ssl::SslStream` via the `AsRef` trait.
 /// If that fails or on other platforms, we return "Unknown" for both fields.
-fn extract_tls_negotiation<S>(
-    _tls_stream: &tokio_native_tls::TlsStream<S>,
-) -> (String, String) {
+fn extract_tls_negotiation<S>(_tls_stream: &tokio_native_tls::TlsStream<S>) -> (String, String) {
     // native-tls does not expose negotiated_tls_version() or
     // negotiated_cipher() in its stable public API across all platforms.
     // We return "Unknown" as a safe fallback.
@@ -233,7 +224,10 @@ mod tests {
         assert!(json.contains("\"notAfter\""), "Missing notAfter");
         assert!(json.contains("\"selfSigned\""), "Missing selfSigned");
         assert!(json.contains("\"sanDomains\""), "Missing sanDomains");
-        assert!(json.contains("\"daysUntilExpiry\""), "Missing daysUntilExpiry");
+        assert!(
+            json.contains("\"daysUntilExpiry\""),
+            "Missing daysUntilExpiry"
+        );
 
         // Verify values
         assert!(json.contains("TLSv1.3"));
@@ -251,10 +245,7 @@ mod tests {
             not_before: 1_690_000_000,
             not_after: 1_720_000_000,
             self_signed: false,
-            san_domains: vec![
-                "github.com".to_string(),
-                "www.github.com".to_string(),
-            ],
+            san_domains: vec!["github.com".to_string(), "www.github.com".to_string()],
             expired: false,
             days_until_expiry: 200,
         };
@@ -288,10 +279,22 @@ mod tests {
 
     #[test]
     fn test_tls_ports_does_not_contain_non_tls() {
-        assert!(!TLS_PORTS.contains(&80), "Port 80 should not be in TLS_PORTS");
-        assert!(!TLS_PORTS.contains(&22), "Port 22 should not be in TLS_PORTS");
-        assert!(!TLS_PORTS.contains(&21), "Port 21 should not be in TLS_PORTS");
-        assert!(!TLS_PORTS.contains(&8080), "Port 8080 should not be in TLS_PORTS");
+        assert!(
+            !TLS_PORTS.contains(&80),
+            "Port 80 should not be in TLS_PORTS"
+        );
+        assert!(
+            !TLS_PORTS.contains(&22),
+            "Port 22 should not be in TLS_PORTS"
+        );
+        assert!(
+            !TLS_PORTS.contains(&21),
+            "Port 21 should not be in TLS_PORTS"
+        );
+        assert!(
+            !TLS_PORTS.contains(&8080),
+            "Port 8080 should not be in TLS_PORTS"
+        );
     }
 
     #[test]
@@ -410,13 +413,19 @@ mod tests {
     async fn test_analyze_tls_connection_refused() {
         // Connecting to a port that's almost certainly not listening
         let result = analyze_tls("127.0.0.1", 19999, Duration::from_millis(500)).await;
-        assert!(result.is_err(), "Should fail when no TLS server is listening");
+        assert!(
+            result.is_err(),
+            "Should fail when no TLS server is listening"
+        );
     }
 
     #[tokio::test]
     async fn test_analyze_tls_timeout() {
         // Use a non-routable IP to force timeout
         let result = analyze_tls("192.0.2.1", 443, Duration::from_millis(100)).await;
-        assert!(result.is_err(), "Should fail with timeout for non-routable IP");
+        assert!(
+            result.is_err(),
+            "Should fail with timeout for non-routable IP"
+        );
     }
 }

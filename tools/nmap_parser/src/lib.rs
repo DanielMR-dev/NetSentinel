@@ -4,12 +4,12 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Probe {
-    pub protocol: String,     // "TCP" or "UDP"
-    pub name: String,         // Probe name e.g., "NULL"
-    pub probe_string: Vec<u8>,// The actual byte string to send
-    pub matches: Vec<Match>,  // List of match rules
+    pub protocol: String,        // "TCP" or "UDP"
+    pub name: String,            // Probe name e.g., "NULL"
+    pub probe_string: Vec<u8>,   // The actual byte string to send
+    pub matches: Vec<Match>,     // List of match rules
     pub softmatches: Vec<Match>, // List of softmatch rules
-    pub ports: Option<String>, // Target ports for this probe
+    pub ports: Option<String>,   // Target ports for this probe
     pub sslports: Option<String>,
     pub totalwaitms: Option<u64>,
     pub tcpwrappedms: Option<u64>,
@@ -25,7 +25,7 @@ pub struct Match {
     pub is_soft: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct ProbeDatabase {
     pub probes: Vec<Probe>,
     pub excludes: Option<String>,

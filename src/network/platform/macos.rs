@@ -221,11 +221,7 @@ fn parse_route_get_output(output: &str) -> Option<String> {
 /// default            192.168.1.1        UGSc           en0
 /// ```
 async fn get_gateway_via_netstat() -> Option<String> {
-    let output = Command::new("netstat")
-        .args(["-rn"])
-        .output()
-        .await
-        .ok()?;
+    let output = Command::new("netstat").args(["-rn"]).output().await.ok()?;
 
     if !output.status.success() {
         return None;
@@ -307,7 +303,10 @@ mod tests {
             "? (192.168.1.2) at aa:bb:cc:dd:ee:02 on en0 ifscope [ethernet]",
             "? (192.168.1.3) at (incomplete) on en0 ifscope [ethernet]",
         ];
-        let devices: Vec<Device> = lines.iter().filter_map(|l| parse_macos_arp_line(l)).collect();
+        let devices: Vec<Device> = lines
+            .iter()
+            .filter_map(|l| parse_macos_arp_line(l))
+            .collect();
         assert_eq!(devices.len(), 2);
         assert_eq!(devices[0].mac, "aa:bb:cc:dd:ee:01");
         assert_eq!(devices[1].mac, "aa:bb:cc:dd:ee:02");

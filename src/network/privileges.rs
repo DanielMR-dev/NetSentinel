@@ -29,6 +29,21 @@ pub struct PrivilegeStatus {
     /// Whether ICMP ping is available (requires raw sockets or elevated).
     pub icmp_available: bool,
 
+    /// Whether ARP sweep (active raw Ethernet) is available.
+    pub arp_available: bool,
+
+    /// Whether UDP raw scanning is available.
+    pub udp_scan_available: bool,
+
+    /// Whether SCTP INIT scanning is available.
+    pub sctp_scan_available: bool,
+
+    /// Whether IPv6 multicast discovery is available.
+    pub ipv6_discovery_available: bool,
+
+    /// Whether FIN/XMAS/NULL raw TCP scans are available.
+    pub fin_xmas_null_available: bool,
+
     /// Human-readable warnings about missing capabilities.
     pub warnings: Vec<String>,
 
@@ -46,11 +61,14 @@ pub fn check_system_privileges() -> PrivilegeStatus {
 
     let (is_elevated, has_cap_net_raw, has_raw_socket) = check_platform_privileges(&platform);
 
-    // SYN scanning requires raw socket capability
+    // All raw-packet features depend on raw socket capability
     let syn_scan_available = has_raw_socket;
-
-    // ICMP requires raw socket capability
     let icmp_available = has_raw_socket;
+    let arp_available = has_raw_socket;
+    let udp_scan_available = has_raw_socket;
+    let sctp_scan_available = has_raw_socket;
+    let ipv6_discovery_available = has_raw_socket;
+    let fin_xmas_null_available = has_raw_socket;
 
     // Generate warnings for missing capabilities
     if !is_elevated {
@@ -59,7 +77,8 @@ pub fn check_system_privileges() -> PrivilegeStatus {
                 if !has_cap_net_raw {
                     warnings.push(
                         "Not running as root and CAP_NET_RAW is not set. \
-                         SYN scanning and ICMP ping will be unavailable. \
+                         SYN/FIN/XMAS/NULL, ICMP ping, ARP sweep, UDP raw, SCTP and IPv6 raw \
+                         discovery will be unavailable. \
                          Run with sudo or set capabilities: sudo setcap cap_net_raw+ep <binary>"
                             .to_string(),
                     );
@@ -67,15 +86,17 @@ pub fn check_system_privileges() -> PrivilegeStatus {
             }
             "windows" => {
                 warnings.push(
-                    "Not running as Administrator. SYN scanning and ICMP ping \
-                     will be unavailable. Run as Administrator for full functionality."
+                    "Not running as Administrator. SYN/FIN/XMAS/NULL, ICMP ping, \
+                     ARP sweep, UDP raw, SCTP and IPv6 raw discovery will be \
+                     unavailable. Run as Administrator for full functionality."
                         .to_string(),
                 );
             }
             "macos" => {
                 warnings.push(
-                    "Not running as root. SYN scanning and ICMP ping will be \
-                     unavailable. Run with sudo for full functionality."
+                    "Not running as root. SYN/FIN/XMAS/NULL, ICMP ping, ARP sweep, \
+                     UDP raw, SCTP and IPv6 raw discovery will be unavailable. \
+                     Run with sudo for full functionality."
                         .to_string(),
                 );
             }
@@ -88,24 +109,27 @@ pub fn check_system_privileges() -> PrivilegeStatus {
         }
     }
 
-    if !syn_scan_available {
-        if is_elevated {
-            // Elevated but still no raw socket — likely a platform limitation
-            warnings.push(
-                "Raw socket creation failed despite elevated privileges. \
-                 SYN scanning may not be supported on this platform."
-                    .to_string(),
-            );
-        }
+    if !has_raw_socket && is_elevated {
+        // Elevated but still no raw socket — likely a platform limitation
+        warnings.push(
+            "Raw socket creation failed despite elevated privileges. \
+             Raw-packet scanning features may not be supported on this platform."
+                .to_string(),
+        );
     }
 
     tracing::info!(
-        "Privilege check: elevated={}, cap_net_raw={}, raw_socket={}, syn={}, icmp={}",
+        "Privilege check: elevated={}, cap_net_raw={}, raw_socket={}, syn={}, icmp={}, arp={}, udp={}, sctp={}, ipv6={}, fin/xmas/null={}",
         is_elevated,
         has_cap_net_raw,
         has_raw_socket,
         syn_scan_available,
-        icmp_available
+        icmp_available,
+        arp_available,
+        udp_scan_available,
+        sctp_scan_available,
+        ipv6_discovery_available,
+        fin_xmas_null_available
     );
 
     PrivilegeStatus {
@@ -114,6 +138,11 @@ pub fn check_system_privileges() -> PrivilegeStatus {
         has_cap_net_raw,
         syn_scan_available,
         icmp_available,
+        arp_available,
+        udp_scan_available,
+        sctp_scan_available,
+        ipv6_discovery_available,
+        fin_xmas_null_available,
         warnings,
         platform,
     }
@@ -262,6 +291,11 @@ mod tests {
             has_cap_net_raw: false,
             syn_scan_available: false,
             icmp_available: false,
+            arp_available: false,
+            udp_scan_available: false,
+            sctp_scan_available: false,
+            ipv6_discovery_available: false,
+            fin_xmas_null_available: false,
             warnings: vec!["test warning".to_string()],
             platform: "linux".to_string(),
         };
@@ -272,6 +306,11 @@ mod tests {
         assert!(json.contains("\"hasCapNetRaw\""));
         assert!(json.contains("\"synScanAvailable\""));
         assert!(json.contains("\"icmpAvailable\""));
+        assert!(json.contains("\"arpAvailable\""));
+        assert!(json.contains("\"udpScanAvailable\""));
+        assert!(json.contains("\"sctpScanAvailable\""));
+        assert!(json.contains("\"ipv6DiscoveryAvailable\""));
+        assert!(json.contains("\"finXmasNullAvailable\""));
     }
 
     #[test]

@@ -95,9 +95,7 @@ pub fn get_platform_capabilities() -> PlatformCapabilities {
                 "Run as Administrator and ensure Npcap is installed."
             )
             .to_string(),
-            "macos" => {
-                "ICMP ping requires root privileges. Run with sudo.".to_string()
-            }
+            "macos" => "ICMP ping requires root privileges. Run with sudo.".to_string(),
             other => {
                 format!("ICMP ping is not supported on platform '{}'.", other)
             }
@@ -122,10 +120,8 @@ pub fn get_platform_capabilities() -> PlatformCapabilities {
                 "Run as Administrator for stealth scanning."
             )
             .to_string(),
-            "macos" => {
-                "SYN scanning requires root privileges. Run with sudo for stealth scanning."
-                    .to_string()
-            }
+            "macos" => "SYN scanning requires root privileges. Run with sudo for stealth scanning."
+                .to_string(),
             _ => "SYN scanning is not available on this platform.".to_string(),
         };
         warnings.push(warning);
@@ -245,13 +241,8 @@ mod tests {
         let original = PlatformCapabilities {
             platform: "linux".to_string(),
             is_elevated: false,
-            capabilities: vec![
-                "tcp_probe".to_string(),
-                "arp_scan".to_string(),
-            ],
-            warnings: vec![
-                "ICMP ping requires root privileges.".to_string(),
-            ],
+            capabilities: vec!["tcp_probe".to_string(), "arp_scan".to_string()],
+            warnings: vec!["ICMP ping requires root privileges.".to_string()],
         };
 
         let json = serde_json::to_string(&original).expect("serialization should not fail");

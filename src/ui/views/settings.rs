@@ -1,7 +1,7 @@
 //! Settings view — profile manager, scan config editor, UI preferences.
 
-use iced::{Alignment, Length};
 use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input};
+use iced::{Alignment, Length};
 
 use crate::ui::theme::{self, TEXT, TEXT_MUTED};
 use crate::ui::widgets;
@@ -15,11 +15,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     let mut profile_list = column![].spacing(4);
 
     if app.settings_profiles.is_empty() {
-        profile_list = profile_list.push(
-            text("No profiles saved yet.")
-                .color(TEXT_MUTED)
-                .size(13),
-        );
+        profile_list = profile_list.push(text("No profiles saved yet.").color(TEXT_MUTED).size(13));
     } else {
         for profile in &app.settings_profiles {
             let is_active = app.settings_profile.id == profile.id;
@@ -80,13 +76,10 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         .padding(8)
         .size(13);
 
-    let timeout_input = text_input(
-        "Timeout (ms)",
-        &profile.scan_config.timeout_ms.to_string(),
-    )
-    .on_input(Message::SettingsTimeoutChanged)
-    .padding(8)
-    .size(13);
+    let timeout_input = text_input("Timeout (ms)", &profile.scan_config.timeout_ms.to_string())
+        .on_input(Message::SettingsTimeoutChanged)
+        .padding(8)
+        .size(13);
 
     let max_hosts_input = text_input(
         "Max Concurrent Hosts",
@@ -104,13 +97,10 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     .padding(8)
     .size(13);
 
-    let retry_input = text_input(
-        "Retry Count",
-        &profile.scan_config.retry_count.to_string(),
-    )
-    .on_input(Message::SettingsRetryChanged)
-    .padding(8)
-    .size(13);
+    let retry_input = text_input("Retry Count", &profile.scan_config.retry_count.to_string())
+        .on_input(Message::SettingsRetryChanged)
+        .padding(8)
+        .size(13);
 
     let scan_ports_check = checkbox(
         "Enable Port Scanning",
@@ -123,12 +113,9 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         Some("Scan Configuration"),
         column![
             row![
-                column![
-                    text("Default CIDR").color(TEXT_MUTED).size(11),
-                    cidr_input,
-                ]
-                .spacing(2)
-                .width(Length::FillPortion(1)),
+                column![text("Default CIDR").color(TEXT_MUTED).size(11), cidr_input,]
+                    .spacing(2)
+                    .width(Length::FillPortion(1)),
                 column![
                     text("Timeout (ms)").color(TEXT_MUTED).size(11),
                     timeout_input,
@@ -153,12 +140,9 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
             ]
             .spacing(12),
             row![
-                column![
-                    text("Retries").color(TEXT_MUTED).size(11),
-                    retry_input,
-                ]
-                .spacing(2)
-                .width(Length::FillPortion(1)),
+                column![text("Retries").color(TEXT_MUTED).size(11), retry_input,]
+                    .spacing(2)
+                    .width(Length::FillPortion(1)),
                 column![].width(Length::FillPortion(1)),
             ]
             .spacing(12),
@@ -232,6 +216,6 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
-            .style(theme::app_background)
+        .style(theme::app_background)
         .into()
 }

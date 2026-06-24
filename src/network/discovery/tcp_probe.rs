@@ -12,8 +12,8 @@ pub async fn probe_hosts(
     port_timeout_ms: u64,
 ) -> Vec<IpAddr> {
     use futures::stream::{self, StreamExt};
-    use tokio::sync::Semaphore;
     use std::sync::Arc;
+    use tokio::sync::Semaphore;
 
     let sem = Arc::new(Semaphore::new(concurrency_limit));
     let timeout_duration = Duration::from_millis(port_timeout_ms);
@@ -27,7 +27,11 @@ pub async fn probe_hosts(
                 let _permit = sem.acquire().await.ok()?;
                 let timeout_ms = timeout_dur.as_millis() as u64;
                 let alive = probe_host_alive(ip, timeout_ms).await.unwrap_or(false);
-                if alive { Some(ip) } else { None }
+                if alive {
+                    Some(ip)
+                } else {
+                    None
+                }
             }
         })
         .buffer_unordered(concurrency_limit)
@@ -77,7 +81,8 @@ mod tests {
             "192.168.255.255".parse().unwrap(),
             80,
             Duration::from_millis(100),
-        ).await;
+        )
+        .await;
         // Result should be false (can't connect)
         assert!(!result);
     }

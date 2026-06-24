@@ -68,11 +68,7 @@ pub const DEFAULT_UDP_PORTS: &[u16] = &[
 /// # Returns
 /// A `Vec<Port>` with one entry per scanned port, each with its determined
 /// state (`Open`, `Closed`, or `Filtered`).
-pub async fn scan_udp_ports(
-    ip: IpAddr,
-    ports: &[u16],
-    timeout_ms: u64,
-) -> Vec<Port> {
+pub async fn scan_udp_ports(ip: IpAddr, ports: &[u16], timeout_ms: u64) -> Vec<Port> {
     let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_UDP_PROBES));
     let timeout = Duration::from_millis(timeout_ms);
 
@@ -131,11 +127,7 @@ pub async fn scan_udp_ports(
 /// - `Open`: A UDP response was received from the target port
 /// - `Closed`: The OS reported `ConnectionRefused` (ICMP Port Unreachable)
 /// - `Filtered`: No response within the timeout (port may be open or firewalled)
-async fn scan_single_udp_port(
-    ip: IpAddr,
-    port: u16,
-    timeout: Duration,
-) -> PortState {
+async fn scan_single_udp_port(ip: IpAddr, port: u16, timeout: Duration) -> PortState {
     // Bind to an ephemeral port on the appropriate address family
     let bind_addr = match ip {
         IpAddr::V4(_) => "0.0.0.0:0",
@@ -203,8 +195,7 @@ async fn scan_single_udp_port(
             // On Linux, ICMP Port Unreachable manifests as ConnectionRefused
             // on the connected UDP socket's recv() call.
             match e.kind() {
-                std::io::ErrorKind::ConnectionRefused
-                | std::io::ErrorKind::ConnectionReset => {
+                std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::ConnectionReset => {
                     debug!(
                         target_ip = %ip,
                         port = port,
@@ -269,7 +260,7 @@ fn build_dns_probe() -> Vec<u8> {
         0x00, 0x00, // Answer RRs: 0
         0x00, 0x00, // Authority RRs: 0
         0x00, 0x00, // Additional RRs: 0
-        0x00,       // Root domain label (empty = ".")
+        0x00, // Root domain label (empty = ".")
         0x00, 0x01, // Type: A
         0x00, 0x01, // Class: IN
     ]
@@ -386,9 +377,7 @@ mod tests {
         // Should contain "public" community string
         let public = b"public";
         assert!(
-            probe
-                .windows(public.len())
-                .any(|w| w == public),
+            probe.windows(public.len()).any(|w| w == public),
             "SNMP probe should contain 'public' community string"
         );
     }
@@ -396,7 +385,7 @@ mod tests {
     #[test]
     fn test_build_udp_probe_empty_for_unknown_ports() {
         // Ports without specific probes should return empty datagrams
-        assert!(build_udp_probe(69).is_empty());  // TFTP
+        assert!(build_udp_probe(69).is_empty()); // TFTP
         assert!(build_udp_probe(500).is_empty()); // IKE
         assert!(build_udp_probe(514).is_empty()); // Syslog
         assert!(build_udp_probe(1900).is_empty()); // SSDP
@@ -406,7 +395,7 @@ mod tests {
     #[test]
     fn test_build_udp_probe_known_ports() {
         // Known ports should return non-empty probes
-        assert!(!build_udp_probe(53).is_empty());  // DNS
+        assert!(!build_udp_probe(53).is_empty()); // DNS
         assert!(!build_udp_probe(123).is_empty()); // NTP
         assert!(!build_udp_probe(161).is_empty()); // SNMP
     }
@@ -438,31 +427,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_scan_udp_ports_empty_list() {
-        let results = scan_udp_ports(
-            "127.0.0.1".parse().unwrap(),
-            &[],
-            500,
-        )
-        .await;
+        let results = scan_udp_ports("127.0.0.1".parse().unwrap(), &[], 500).await;
 
-        assert!(results.is_empty(), "Empty port list should return empty results");
+        assert!(
+            results.is_empty(),
+            "Empty port list should return empty results"
+        );
     }
 
     #[tokio::test]
     async fn test_scan_udp_localhost_closed_port() {
         // Port 1 is almost certainly not running a UDP service on localhost.
         // We expect either Closed (ICMP unreachable) or Filtered (timeout).
-        let results = scan_udp_ports(
-            "127.0.0.1".parse().unwrap(),
-            &[1],
-            500,
-        )
-        .await;
+        let results = scan_udp_ports("127.0.0.1".parse().unwrap(), &[1], 500).await;
 
         assert_eq!(results.len(), 1);
         assert!(
-            results[0].state == PortState::Closed
-                || results[0].state == PortState::Filtered,
+            results[0].state == PortState::Closed || results[0].state == PortState::Filtered,
             "Port 1 on localhost should be Closed or Filtered, got {:?}",
             results[0].state
         );
@@ -471,12 +452,7 @@ mod tests {
     #[tokio::test]
     async fn test_scan_udp_port_service_names() {
         let ports = vec![53, 123, 161];
-        let results = scan_udp_ports(
-            "127.0.0.1".parse().unwrap(),
-            &ports,
-            500,
-        )
-        .await;
+        let results = scan_udp_ports("127.0.0.1".parse().unwrap(), &ports, 500).await;
 
         // Verify service names are populated for known ports
         let dns_port = results.iter().find(|p| p.number == 53).unwrap();

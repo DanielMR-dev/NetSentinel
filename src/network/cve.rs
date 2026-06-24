@@ -58,8 +58,9 @@ struct CveEntry {
 
 /// The CVE database connection manager.
 pub struct CveDatabase {
-    /// Mutex over the SQLite connection
-    conn: Mutex<Connection>,
+    /// Mutex over the SQLite connection, if one could be established.
+    /// A `None` value means CVE lookups are unavailable (graceful degradation).
+    conn: Option<Mutex<Connection>>,
 }
 
 /// Bundled SQLite CVE database bytes.
@@ -81,12 +82,16 @@ static CVE_DATABASE: Lazy<std::sync::Arc<CveDatabase>> = Lazy::new(|| {
             let _ = std::fs::create_dir_all(&path);
         }
         path.push("cve-database.db");
-        
+
         // Always extract the embedded database if it doesn't exist, or if we want to ensure it's up to date.
         // For now, if it doesn't exist, write it.
         if !path.exists() {
             if let Err(e) = std::fs::write(&path, CVE_DB_BYTES) {
-                tracing::error!("Failed to write embedded SQLite database to {:?}: {}", path, e);
+                tracing::error!(
+                    "Failed to write embedded SQLite database to {:?}: {}",
+                    path,
+                    e
+                );
             } else {
                 tracing::info!("Extracted embedded SQLite database to {:?}", path);
             }
@@ -95,17 +100,31 @@ static CVE_DATABASE: Lazy<std::sync::Arc<CveDatabase>> = Lazy::new(|| {
     }
 
     let conn = if let Some(path) = db_path {
-        Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .unwrap_or_else(|e| {
+        match Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+            Ok(conn) => Some(conn),
+            Err(e) => {
                 tracing::error!("Failed to open CVE database at {:?}: {}", path, e);
-                Connection::open_in_memory().expect("Failed to open in-memory SQLite")
-            })
+                match Connection::open_in_memory() {
+                    Ok(conn) => Some(conn),
+                    Err(e2) => {
+                        tracing::error!("Failed to open in-memory CVE database: {}", e2);
+                        None
+                    }
+                }
+            }
+        }
     } else {
-        Connection::open_in_memory().expect("Failed to open in-memory SQLite")
+        match Connection::open_in_memory() {
+            Ok(conn) => Some(conn),
+            Err(e) => {
+                tracing::error!("Failed to open in-memory CVE database: {}", e);
+                None
+            }
+        }
     };
 
     std::sync::Arc::new(CveDatabase {
-        conn: Mutex::new(conn),
+        conn: conn.map(Mutex::new),
     })
 });
 
@@ -116,7 +135,12 @@ impl CveDatabase {
         let detected_version = banner::extract_version(banner_str);
         let search_keys = get_search_keys(service, banner_str);
 
-        let conn = match self.conn.lock() {
+        let conn_mutex = match self.conn.as_ref() {
+            Some(conn) => conn,
+            None => return matches, // CVE database unavailable
+        };
+
+        let conn = match conn_mutex.lock() {
             Ok(guard) => guard,
             Err(_) => return matches, // Poisoned lock
         };
@@ -126,7 +150,7 @@ impl CveDatabase {
             // We use a LIKE query to do fuzzy matching on the affected_software
             let query = "SELECT cve_id, severity, description, affected_software, cvss_score FROM cves WHERE affected_software LIKE ?1";
             let like_pattern = format!("%{}%", key_lower);
-            
+
             let mut stmt = match conn.prepare(query) {
                 Ok(s) => s,
                 Err(e) => {
@@ -156,17 +180,20 @@ impl CveDatabase {
             };
 
             let mut fetched_entries: Vec<CveEntry> = cve_iter.filter_map(Result::ok).collect();
-            
+
             // Now fetch versions for each entry
             for entry in &mut fetched_entries {
-                let mut vstmt = match conn.prepare("SELECT version_pattern FROM affected_versions WHERE cve_id = ?1") {
+                let mut vstmt = match conn
+                    .prepare("SELECT version_pattern FROM affected_versions WHERE cve_id = ?1")
+                {
                     Ok(s) => s,
                     Err(_) => continue,
                 };
-                let v_iter = match vstmt.query_map(params![entry.cve_id], |row| row.get::<_, String>(0)) {
-                    Ok(i) => i,
-                    Err(_) => continue,
-                };
+                let v_iter =
+                    match vstmt.query_map(params![entry.cve_id], |row| row.get::<_, String>(0)) {
+                        Ok(i) => i,
+                        Err(_) => continue,
+                    };
                 entry.affected_versions = v_iter.filter_map(Result::ok).collect();
             }
 
@@ -190,7 +217,11 @@ impl CveDatabase {
         }
 
         // Sort by CVSS score descending (most critical first)
-        matches.sort_by(|a, b| b.cvss_score.partial_cmp(&a.cvss_score).unwrap_or(std::cmp::Ordering::Equal));
+        matches.sort_by(|a, b| {
+            b.cvss_score
+                .partial_cmp(&a.cvss_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         matches
     }
@@ -199,30 +230,44 @@ impl CveDatabase {
 /// Look up CVEs for a banner result.
 pub fn lookup_cves(banner_result: &banner::BannerResult) -> Vec<CveMatch> {
     let service = banner_result.service.as_deref().unwrap_or("");
-    CVE_DATABASE.lookup(&banner_result.banner, service, &banner_result.ip, banner_result.port)
+    CVE_DATABASE.lookup(
+        &banner_result.banner,
+        service,
+        &banner_result.ip,
+        banner_result.port,
+    )
 }
 
 /// Update the CVE database by replacing the SQLite DB file.
 pub async fn update_cve_database(db_bytes: Vec<u8>) -> Result<(), ScanError> {
-    let local_data_dir = get_app_local_data_dir()
-        .ok_or_else(|| ScanError::NetworkError("Could not determine local data directory".to_string()))?;
+    let local_data_dir = get_app_local_data_dir().ok_or_else(|| {
+        ScanError::NetworkError("Could not determine local data directory".to_string())
+    })?;
 
-    tokio::fs::create_dir_all(&local_data_dir).await
-        .map_err(|e| ScanError::NetworkError(format!("Failed to create local data directory: {}", e)))?;
+    tokio::fs::create_dir_all(&local_data_dir)
+        .await
+        .map_err(|e| {
+            ScanError::NetworkError(format!("Failed to create local data directory: {}", e))
+        })?;
 
     let target_path = local_data_dir.join("cve-database.db");
     let temp_path = local_data_dir.join("cve-database.tmp");
 
-    tokio::fs::write(&temp_path, &db_bytes).await
-        .map_err(|e| ScanError::NetworkError(format!("Failed to write temporary CVE database: {}", e)))?;
+    tokio::fs::write(&temp_path, &db_bytes).await.map_err(|e| {
+        ScanError::NetworkError(format!("Failed to write temporary CVE database: {}", e))
+    })?;
 
-    // In a real scenario we'd need to close the SQLite connection before overwriting it on Windows, 
+    // In a real scenario we'd need to close the SQLite connection before overwriting it on Windows,
     // but we can just overwrite on Linux.
-    tokio::fs::rename(&temp_path, &target_path).await
+    tokio::fs::rename(&temp_path, &target_path)
+        .await
         .map_err(|e| ScanError::NetworkError(format!("Failed to save CVE database: {}", e)))?;
 
-    tracing::info!("CVE database successfully updated and saved to {:?}", target_path);
-    // Note: The global connection will still be pointing to the old handle until app restart, 
+    tracing::info!(
+        "CVE database successfully updated and saved to {:?}",
+        target_path
+    );
+    // Note: The global connection will still be pointing to the old handle until app restart,
     // unless we re-initialize it. For Phase 2, a restart requirement is acceptable.
     Ok(())
 }
@@ -242,10 +287,29 @@ fn get_search_keys(service: &str, banner_str: &str) -> Vec<String> {
     }
 
     let software_patterns = [
-        "openssh", "nginx", "apache", "httpd", "iis", "vsftpd", "proftpd",
-        "mysql", "mariadb", "postgres", "openssl", "samba", "smbd",
-        "lighttpd", "tomcat", "jetty", "exim", "postfix", "sendmail",
-        "openvpn", "redis", "memcached", "mongodb",
+        "openssh",
+        "nginx",
+        "apache",
+        "httpd",
+        "iis",
+        "vsftpd",
+        "proftpd",
+        "mysql",
+        "mariadb",
+        "postgres",
+        "openssl",
+        "samba",
+        "smbd",
+        "lighttpd",
+        "tomcat",
+        "jetty",
+        "exim",
+        "postfix",
+        "sendmail",
+        "openvpn",
+        "redis",
+        "memcached",
+        "mongodb",
     ];
 
     for pattern in &software_patterns {
@@ -267,7 +331,7 @@ fn get_search_keys(service: &str, banner_str: &str) -> Vec<String> {
 fn version_matches(entry: &CveEntry, detected_version: Option<&str>) -> bool {
     let detected = match detected_version {
         Some(v) => v,
-        None => return true, 
+        None => return true,
     };
 
     for pattern in &entry.affected_versions {

@@ -1,7 +1,7 @@
 //! Dashboard view — system overview, network info, CVE summary, device list.
 
-use iced::{Alignment, Length};
 use iced::widget::{column, container, row, scrollable, text};
+use iced::{Alignment, Length};
 
 use crate::ui::theme::{self, TEXT, TEXT_MUTED};
 use crate::ui::widgets;
@@ -13,7 +13,8 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
 
     // ── CVE Warning Banner (placed at the top if alerts exist) ──────────
     if !app.cve_alerts.is_empty() {
-        let unique_hosts: std::collections::HashSet<&str> = app.cve_alerts.iter().map(|a| a.ip.as_str()).collect();
+        let unique_hosts: std::collections::HashSet<&str> =
+            app.cve_alerts.iter().map(|a| a.ip.as_str()).collect();
         let total = app.cve_alerts.len();
         let host_count = unique_hosts.len();
 
@@ -33,16 +34,32 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
 
         let mut severity_row = row![].spacing(16);
         if critical_count > 0 {
-            severity_row = severity_row.push(text(format!("{} critical", critical_count)).color(theme::DANGER).size(12));
+            severity_row = severity_row.push(
+                text(format!("{} critical", critical_count))
+                    .color(theme::DANGER)
+                    .size(12),
+            );
         }
         if high_count > 0 {
-            severity_row = severity_row.push(text(format!("{} high", high_count)).color(theme::WARNING).size(12));
+            severity_row = severity_row.push(
+                text(format!("{} high", high_count))
+                    .color(theme::WARNING)
+                    .size(12),
+            );
         }
         if medium_count > 0 {
-            severity_row = severity_row.push(text(format!("{} medium", medium_count)).color(theme::WARNING).size(12));
+            severity_row = severity_row.push(
+                text(format!("{} medium", medium_count))
+                    .color(theme::WARNING)
+                    .size(12),
+            );
         }
         if low_count > 0 {
-            severity_row = severity_row.push(text(format!("{} low", low_count)).color(theme::INFO).size(12));
+            severity_row = severity_row.push(
+                text(format!("{} low", low_count))
+                    .color(theme::INFO)
+                    .size(12),
+            );
         }
 
         let banner_text = format!(
@@ -57,7 +74,9 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
             row![
                 text("⚠️").size(16),
                 text(banner_text).color(theme::TEXT).size(14),
-            ].spacing(8).align_y(iced::Alignment::Center),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
             severity_row
         ]
         .spacing(6)
@@ -121,11 +140,26 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         // Header row
         device_list = device_list.push(
             row![
-                text("IP Address").color(TEXT_MUTED).size(12).width(Length::FillPortion(2)),
-                text("MAC").color(TEXT_MUTED).size(12).width(Length::FillPortion(2)),
-                text("Hostname").color(TEXT_MUTED).size(12).width(Length::FillPortion(2)),
-                text("Status").color(TEXT_MUTED).size(12).width(Length::FillPortion(1)),
-                text("Ports").color(TEXT_MUTED).size(12).width(Length::FillPortion(1)),
+                text("IP Address")
+                    .color(TEXT_MUTED)
+                    .size(12)
+                    .width(Length::FillPortion(2)),
+                text("MAC")
+                    .color(TEXT_MUTED)
+                    .size(12)
+                    .width(Length::FillPortion(2)),
+                text("Hostname")
+                    .color(TEXT_MUTED)
+                    .size(12)
+                    .width(Length::FillPortion(2)),
+                text("Status")
+                    .color(TEXT_MUTED)
+                    .size(12)
+                    .width(Length::FillPortion(1)),
+                text("Ports")
+                    .color(TEXT_MUTED)
+                    .size(12)
+                    .width(Length::FillPortion(1)),
             ]
             .spacing(8)
             .padding([4, 8])
@@ -133,19 +167,28 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         );
 
         for device in &app.discovered_devices {
-            let hostname = device
-                .hostname
-                .as_deref()
-                .unwrap_or("-");
+            let hostname = device.hostname.as_deref().unwrap_or("-");
             let status_str = format!("{:?}", device.status);
             let port_count = device.ports.len();
 
             let device_row = row![
-                text(&device.ip).color(TEXT).size(12).width(Length::FillPortion(2)),
-                text(&device.mac).color(TEXT).size(12).width(Length::FillPortion(2)),
-                text(hostname).color(TEXT).size(12).width(Length::FillPortion(2)),
+                text(&device.ip)
+                    .color(TEXT)
+                    .size(12)
+                    .width(Length::FillPortion(2)),
+                text(&device.mac)
+                    .color(TEXT)
+                    .size(12)
+                    .width(Length::FillPortion(2)),
+                text(hostname)
+                    .color(TEXT)
+                    .size(12)
+                    .width(Length::FillPortion(2)),
                 widgets::status_badge(&status_str).width(Length::FillPortion(1)),
-                text(format!("{}", port_count)).color(TEXT).size(12).width(Length::FillPortion(1)),
+                text(format!("{}", port_count))
+                    .color(TEXT)
+                    .size(12)
+                    .width(Length::FillPortion(1)),
             ]
             .spacing(8)
             .padding([4, 8])
@@ -167,6 +210,6 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
-            .style(theme::app_background)
+        .style(theme::app_background)
         .into()
 }

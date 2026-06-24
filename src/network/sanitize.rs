@@ -7,23 +7,10 @@
 use std::net::IpAddr;
 use std::str::FromStr;
 
-use once_cell::sync::Lazy;
-use regex::Regex;
-
 use crate::error::ScanError;
 
-/// Regex for validating profile/baseline names and IDs.
-/// Allows alphanumeric characters, underscores, hyphens, and spaces.
-/// Length: 1-100 characters.
-static NAME_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^[a-zA-Z0-9_\-\s]{1,100}$").unwrap_or_else(|_| Regex::new(r"^.{1,100}$").unwrap())
-});
-
-/// Regex for validating UUID format strings.
-static UUID_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-        .unwrap_or_else(|_| Regex::new(r"^.{1,100}$").unwrap())
-});
+/// Maximum length for validated names and identifiers.
+const MAX_NAME_LEN: usize = 100;
 
 /// Validate and parse a CIDR notation string.
 ///
@@ -122,7 +109,8 @@ pub fn validate_ports(ports: &[u16]) -> Result<(), ScanError> {
 
 /// Validate a name string (profile name, baseline name, etc.).
 ///
-/// Names must match the regex `^[a-zA-Z0-9_\-\s]{1,100}$`.
+/// Names must be 1-100 characters and contain only alphanumeric characters,
+/// underscores, hyphens, and spaces.
 /// Returns the trimmed name on success.
 pub fn validate_name(input: &str) -> Result<String, ScanError> {
     let trimmed = input.trim();
@@ -131,10 +119,20 @@ pub fn validate_name(input: &str) -> Result<String, ScanError> {
         return Err(ScanError::InvalidInput("Name cannot be empty".to_string()));
     }
 
-    if !NAME_REGEX.is_match(trimmed) {
+    if trimmed.len() > MAX_NAME_LEN {
         return Err(ScanError::InvalidInput(format!(
-            "Name '{}' contains invalid characters. Only alphanumeric, underscore, hyphen, and space are allowed (max 100 chars)",
-            trimmed
+            "Name '{}' exceeds maximum length of {} characters",
+            trimmed, MAX_NAME_LEN
+        )));
+    }
+
+    if !trimmed
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c.is_whitespace())
+    {
+        return Err(ScanError::InvalidInput(format!(
+            "Name '{}' contains invalid characters. Only alphanumeric, underscore, hyphen, and space are allowed (max {} chars)",
+            trimmed, MAX_NAME_LEN
         )));
     }
 
@@ -158,7 +156,7 @@ pub fn validate_id(input: &str) -> Result<String, ScanError> {
         return Ok(trimmed.to_string());
     }
 
-    if !UUID_REGEX.is_match(trimmed) {
+    if !is_valid_uuid(trimmed) {
         return Err(ScanError::InvalidInput(format!(
             "ID '{}' is not a valid UUID format",
             trimmed
@@ -166,6 +164,34 @@ pub fn validate_id(input: &str) -> Result<String, ScanError> {
     }
 
     Ok(trimmed.to_string())
+}
+
+/// Manual UUID format check without regex to avoid production panics.
+///
+/// Accepts `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` where `x` is a hex digit.
+fn is_valid_uuid(input: &str) -> bool {
+    let bytes = input.as_bytes();
+    if bytes.len() != 36 {
+        return false;
+    }
+
+    let expected_dashes: [usize; 4] = [8, 13, 18, 23];
+    for &pos in &expected_dashes {
+        if bytes[pos] != b'-' {
+            return false;
+        }
+    }
+
+    for (i, &b) in bytes.iter().enumerate() {
+        if expected_dashes.contains(&i) {
+            continue;
+        }
+        if !b.is_ascii_hexdigit() {
+            return false;
+        }
+    }
+
+    true
 }
 
 /// Validate a timeout value in milliseconds.

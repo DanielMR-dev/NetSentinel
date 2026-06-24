@@ -1,28 +1,30 @@
-use std::net::IpAddr;
-use ipnetwork::Ipv4Network;
 use crate::error::ScanError;
+use ipnetwork::Ipv4Network;
+use std::net::IpAddr;
 
 /// Validate and parse a CIDR notation string
 pub fn parse_cidr(cidr: &str) -> Result<Vec<IpAddr>, ScanError> {
     let trimmed = cidr.trim();
-    
+
     // Parse the network
-    let network: Ipv4Network = trimmed.parse()
+    let network: Ipv4Network = trimmed
+        .parse()
         .map_err(|e| ScanError::InvalidCidr(format!("'{}': {}", trimmed, e)))?;
-    
+
     // Generate all IP addresses in the range
     let mut ips = Vec::new();
     for ip in network.iter() {
         ips.push(IpAddr::V4(ip));
     }
-    
+
     Ok(ips)
 }
 
 /// Validate a CIDR string without generating all IPs
 pub fn validate_cidr(cidr: &str) -> Result<Ipv4Network, ScanError> {
     let trimmed = cidr.trim();
-    trimmed.parse()
+    trimmed
+        .parse()
         .map_err(|e| ScanError::InvalidCidr(format!("'{}': {}", trimmed, e)))
 }
 

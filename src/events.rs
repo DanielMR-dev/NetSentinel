@@ -35,6 +35,9 @@ pub enum AppEvent {
         device_count: u32,
         duration_ms: u64,
         status: String,
+        /// Snapshot of discovered devices at completion, used for automatic
+        /// history persistence.
+        devices: Vec<Device>,
     },
 
     /// A log message from the scanning engine.

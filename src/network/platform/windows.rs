@@ -259,7 +259,10 @@ mod tests {
             "  192.168.1.2           aa-bb-cc-dd-ee-02     dynamic",
             "  192.168.1.255         ff-ff-ff-ff-ff-ff     static",
         ];
-        let devices: Vec<Device> = lines.iter().filter_map(|l| parse_windows_arp_line(l)).collect();
+        let devices: Vec<Device> = lines
+            .iter()
+            .filter_map(|l| parse_windows_arp_line(l))
+            .collect();
         assert_eq!(devices.len(), 2);
         assert_eq!(devices[0].mac, "aa:bb:cc:dd:ee:01");
         assert_eq!(devices[1].mac, "aa:bb:cc:dd:ee:02");

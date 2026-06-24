@@ -14,11 +14,10 @@ use tracing::warn;
 
 use crate::error::ScanError;
 use crate::events::AppEvent;
-use crate::network::{cidr, host_discovery, icmp, sanitize};
 use crate::network::timing::TimingTemplate;
+use crate::network::{cidr, host_discovery, icmp, sanitize};
 use crate::state::SharedScanState;
 use crate::types::{Device, ScanResponse, ScanResultsResponse, ScanType};
-
 
 /// Start a network scan.
 ///
@@ -60,21 +59,63 @@ pub async fn start_scan(
         });
     };
 
-    // If SYN scan requested, verify privileges
-    if effective_scan_type == ScanType::Syn {
-        let priv_status = tokio::task::spawn_blocking(
-            crate::network::privileges::check_system_privileges,
-        )
-        .await
-        .map_err(|e| ScanError::NetworkError(format!("Privilege check failed: {}", e)))?;
+    // Verify privileges for raw scan types before starting.
+    let requires_raw_socket = matches!(
+        effective_scan_type,
+        ScanType::Syn
+            | ScanType::Fin
+            | ScanType::Xmas
+            | ScanType::Null
+            | ScanType::Udp
+            | ScanType::Sctp
+    );
 
-        if !priv_status.syn_scan_available {
-            send_log(
-                "warn",
-                "Insufficient privileges for SYN scan (requires root/Administrator/CAP_NET_RAW). Downgrading to TCP Connect scan.",
-                None,
-            );
-            effective_scan_type = ScanType::Connect;
+    // Cache the UDP scan mode once so we do not re-check privileges per host.
+    let mut udp_uses_raw = true;
+
+    if requires_raw_socket {
+        let priv_status =
+            tokio::task::spawn_blocking(crate::network::privileges::check_system_privileges)
+                .await
+                .map_err(|e| ScanError::Internal(format!("Privilege check task failed: {}", e)))?;
+
+        match effective_scan_type {
+            ScanType::Syn | ScanType::Fin | ScanType::Xmas | ScanType::Null => {
+                if !priv_status.syn_scan_available && !priv_status.fin_xmas_null_available {
+                    send_log(
+                        "warn",
+                        &format!(
+                            "Insufficient privileges for {} scan (requires root/Administrator/CAP_NET_RAW). Downgrading to TCP Connect scan.",
+                            effective_scan_type
+                        ),
+                        None,
+                    );
+                    effective_scan_type = ScanType::Connect;
+                }
+            }
+            ScanType::Udp => {
+                if !priv_status.udp_scan_available {
+                    udp_uses_raw = false;
+                    send_log(
+                        "warn",
+                        "Insufficient privileges for raw UDP scan (requires root/Administrator/CAP_NET_RAW). Falling back to UDP connect/basic scan for all hosts.",
+                        None,
+                    );
+                }
+            }
+            ScanType::Sctp => {
+                if !priv_status.sctp_scan_available {
+                    send_log(
+                        "error",
+                        "SCTP INIT scan requires root/Administrator/CAP_NET_RAW privileges.",
+                        None,
+                    );
+                    return Err(ScanError::ElevatedPrivilegesRequired(
+                        "SCTP INIT scan requires elevated privileges".to_string(),
+                    ));
+                }
+            }
+            ScanType::Connect => {}
         }
     }
 
@@ -93,14 +134,13 @@ pub async fn start_scan(
     // Check if already running
     if state.is_running() {
         send_log("error", "Scan already in progress", None);
-        return Err(ScanError::NetworkError("Scan already in progress".to_string()));
+        return Err(ScanError::AlreadyRunning);
     }
 
     // Resolve settings parameters
     let effective_max_concurrent = max_concurrent_hosts.unwrap_or(50) as usize;
-    let methods = discovery_methods.unwrap_or_else(|| {
-        vec!["arp".into(), "tcp_probe".into(), "icmp".into()]
-    });
+    let methods =
+        discovery_methods.unwrap_or_else(|| vec!["arp".into(), "tcp_probe".into(), "icmp".into()]);
     let _use_arp = methods.iter().any(|m| m == "arp");
     let _use_tcp = methods.iter().any(|m| m == "tcp_probe");
     let _use_icmp = methods.iter().any(|m| m == "icmp");
@@ -148,21 +188,22 @@ pub async fn start_scan(
             effective_retry_count as u32,
         )
         .await;
-        
+
         // Extend with NetBIOS if requested (and if we have IPv4 targets)
         if _use_arp {
             let ipv4 = network.ip();
-            let bcast = std::net::Ipv4Addr::new(ipv4.octets()[0], ipv4.octets()[1], ipv4.octets()[2], 255);
+            let bcast =
+                std::net::Ipv4Addr::new(ipv4.octets()[0], ipv4.octets()[1], ipv4.octets()[2], 255);
             if let Ok(nbns_devs) = crate::network::mdns_netbios::discover_netbios(bcast).await {
-                    if let Ok(ref mut devs) = discovery_result {
-                        for d in nbns_devs {
-                            if !devs.iter().any(|existing| existing.ip == d.ip) {
-                                devs.push(d);
-                            }
+                if let Ok(ref mut devs) = discovery_result {
+                    for d in nbns_devs {
+                        if !devs.iter().any(|existing| existing.ip == d.ip) {
+                            devs.push(d);
                         }
                     }
+                }
             }
-            
+
             // Extend with mDNS
             if let Ok(mdns_devs) = crate::network::mdns_netbios::discover_mdns().await {
                 if let Ok(ref mut devs) = discovery_result {
@@ -173,9 +214,11 @@ pub async fn start_scan(
                     }
                 }
             }
-            
+
             // Extend with IPv6
-            if let Ok(ipv6_devs) = crate::network::ipv6_discovery::discover_ipv6_hosts(event_tx_clone.clone()).await {
+            if let Ok(ipv6_devs) =
+                crate::network::ipv6_discovery::discover_ipv6_hosts(event_tx_clone.clone()).await
+            {
                 if let Ok(ref mut devs) = discovery_result {
                     for d in ipv6_devs {
                         if !devs.iter().any(|existing| existing.ip == d.ip) {
@@ -192,84 +235,153 @@ pub async fn start_scan(
             Ok(mut devices) => {
                 // Perform Port Scanning if requested
                 if scan_ports && !ports.is_empty() && !devices.is_empty() {
-                    let timing_controller = crate::network::timing::TimingController::new(effective_timing.clone());
-                    
+                    let timing_controller =
+                        crate::network::timing::TimingController::new(effective_timing.clone());
+
                     for device in devices.iter_mut() {
-                        if !state_clone.is_running() { break; }
-                        
+                        if !state_clone.is_running() {
+                            break;
+                        }
+
                         let ip_addr = match device.ip.parse::<std::net::Ipv4Addr>() {
                             Ok(ip) => ip,
                             Err(_) => continue, // Ignore IPv6 for raw scans currently
                         };
-                        
+
                         let (mut scanned_ports, detected_ttl) = match scan_type_for_thread {
                             ScanType::Syn | ScanType::Fin | ScanType::Xmas | ScanType::Null => {
-                                if let Ok(scanner) = crate::network::tcp_raw_scan::RawTcpScanner::new_for_target(ip_addr, scan_type_for_thread.clone()).await {
-                                    scanner.scan_ports(ip_addr, &ports, &timing_controller).await
+                                if let Ok(scanner) =
+                                    crate::network::tcp_raw_scan::RawTcpScanner::new_for_target(
+                                        ip_addr,
+                                        scan_type_for_thread.clone(),
+                                    )
+                                    .await
+                                {
+                                    scanner
+                                        .scan_ports(ip_addr, &ports, &timing_controller)
+                                        .await
                                 } else {
                                     (vec![], None)
                                 }
-                            },
+                            }
                             ScanType::Udp => {
-                                if let Ok(scanner) = crate::network::udp_raw_scan::UdpRawScanner::new_for_target(ip_addr).await {
-                                    scanner.scan_ports(ip_addr, &ports, &timing_controller).await
+                                if udp_uses_raw {
+                                    if let Ok(scanner) =
+                                        crate::network::udp_raw_scan::UdpRawScanner::new_for_target(
+                                            ip_addr,
+                                        )
+                                        .await
+                                    {
+                                        scanner
+                                            .scan_ports(ip_addr, &ports, &timing_controller)
+                                            .await
+                                    } else {
+                                        let udp_ports = crate::network::udp_scan::scan_udp_ports(
+                                            std::net::IpAddr::V4(ip_addr),
+                                            &ports,
+                                            timing_controller.connection_timeout().as_millis()
+                                                as u64,
+                                        )
+                                        .await;
+                                        (udp_ports, None)
+                                    }
                                 } else {
-                                    (vec![], None)
+                                    let udp_ports = crate::network::udp_scan::scan_udp_ports(
+                                        std::net::IpAddr::V4(ip_addr),
+                                        &ports,
+                                        timing_controller.connection_timeout().as_millis() as u64,
+                                    )
+                                    .await;
+                                    (udp_ports, None)
                                 }
-                            },
+                            }
                             ScanType::Sctp => {
-                                if let Ok(scanner) = crate::network::sctp_scan::SctpScanner::new_for_target(ip_addr).await {
-                                    scanner.scan_ports(ip_addr, &ports, &timing_controller).await
+                                if let Ok(scanner) =
+                                    crate::network::sctp_scan::SctpScanner::new_for_target(ip_addr)
+                                        .await
+                                {
+                                    scanner
+                                        .scan_ports(ip_addr, &ports, &timing_controller)
+                                        .await
                                 } else {
                                     (vec![], None)
                                 }
-                            },
+                            }
                             ScanType::Connect => {
                                 let ip: std::net::IpAddr = ip_addr.into();
-                                let timeout_ms = timing_controller.connection_timeout().as_millis() as u64;
-                                let connect_ports = crate::network::host_discovery::scan_ports(ip, &ports, timeout_ms).await;
+                                let timeout_ms =
+                                    timing_controller.connection_timeout().as_millis() as u64;
+                                let connect_ports = crate::network::host_discovery::scan_ports(
+                                    ip, &ports, timeout_ms,
+                                )
+                                .await;
                                 (connect_ports, None)
                             }
                         };
-                        
+
                         // Perform service detection on Open ports
                         let detector = crate::network::service_detection::ServiceDetector::new(
-                            std::time::Duration::from_millis(timing_controller.connection_timeout().as_millis() as u64 * 2)
+                            std::time::Duration::from_millis(
+                                timing_controller.connection_timeout().as_millis() as u64 * 2,
+                            ),
                         );
-                        
+
                         for port in scanned_ports.iter_mut() {
-                            if port.state == crate::types::PortState::Open && port.protocol == "tcp" {
-                                if let Ok(info) = detector.detect_tcp(&device.ip, port.number).await {
+                            if port.state == crate::types::PortState::Open && port.protocol == "tcp"
+                            {
+                                if let Ok(info) = detector.detect_tcp(&device.ip, port.number).await
+                                {
                                     if let Some(srv) = info.service {
                                         port.service = Some(srv);
                                     }
                                 }
                             }
                         }
-                        
+
                         device.ports = scanned_ports.clone();
                         if let Some(ttl) = detected_ttl {
                             device.os = Some(format!("TTL: {}", ttl));
                         }
-                        
+
                         // Run Web Audits
                         if let Some(profile) = web_audit_profile {
                             let mut audits = Vec::new();
                             for port in &scanned_ports {
-                                if port.state == crate::types::PortState::Open && (port.number == 80 || port.number == 443 || port.number == 8080 || port.number == 8443) {
+                                if port.state == crate::types::PortState::Open
+                                    && (port.number == 80
+                                        || port.number == 443
+                                        || port.number == 8080
+                                        || port.number == 8443)
+                                {
                                     let is_https = port.number == 443 || port.number == 8443;
-                                    if let Ok(res) = crate::network::web_audit::audit_web_service(&device.ip, port.number, is_https, profile).await {
+                                    if let Ok(res) = crate::network::web_audit::audit_web_service(
+                                        &device.ip,
+                                        port.number,
+                                        is_https,
+                                        profile,
+                                    )
+                                    .await
+                                    {
                                         audits.push(res);
                                     }
                                 }
                             }
                             device.web_audits = audits;
                         }
-                        
+
                         // Run Active Checks
                         if run_active_checks.unwrap_or(false) {
-                            let open_ports: Vec<u16> = scanned_ports.iter().filter(|p| p.state == crate::types::PortState::Open).map(|p| p.number).collect();
-                            device.active_checks = crate::network::active_checks::run_active_checks(&device.ip, &open_ports).await;
+                            let open_ports: Vec<u16> = scanned_ports
+                                .iter()
+                                .filter(|p| p.state == crate::types::PortState::Open)
+                                .map(|p| p.number)
+                                .collect();
+                            device.active_checks =
+                                crate::network::active_checks::run_active_checks(
+                                    &device.ip,
+                                    &open_ports,
+                                )
+                                .await;
                         }
                     }
                 }
@@ -286,6 +398,7 @@ pub async fn start_scan(
                     device_count,
                     duration_ms,
                     status: "completed".to_string(),
+                    devices,
                 });
             }
             Err(e) => {
@@ -295,6 +408,7 @@ pub async fn start_scan(
                     device_count: 0,
                     duration_ms,
                     status: format!("error: {}", e),
+                    devices: Vec::new(),
                 });
             }
         }
@@ -446,13 +560,7 @@ async fn try_icmp_discovery(
     icmp::check_icmp_privileges()?;
 
     // Run ICMP ping sweep
-    let devices = icmp::icmp_ping_sweep(
-        ips.to_vec(),
-        timeout_ms,
-        max_concurrent,
-        event_tx,
-    )
-    .await?;
+    let devices = icmp::icmp_ping_sweep(ips.to_vec(), timeout_ms, max_concurrent, event_tx).await?;
 
     Ok(devices)
 }

@@ -176,16 +176,22 @@ fn ping_host_blocking(ip: Ipv4Addr, timeout_ms: u64) -> Result<Option<u8>, ScanE
                     continue; // Packet too small
                 }
 
+                // Defensive validation before creating the byte slice.
+                if size > recv_buf.len() {
+                    continue;
+                }
+
                 // SAFETY: `recv_from` returned `Ok((size, _))`, which guarantees that the
                 // first `size` elements of `recv_buf` have been initialized by the kernel.
-                // We only create a slice of exactly `size` elements, so no uninitialized
-                // memory is read. The `MaybeUninit<u8>` layout is identical to `u8` layout,
+                // We verified `size <= recv_buf.len()` above, so the slice is in bounds.
+                // The `MaybeUninit<u8>` layout is identical to `u8` layout,
                 // making the pointer cast sound.
-                let recv_bytes = unsafe {
-                    std::slice::from_raw_parts(recv_buf[0].as_ptr(), size)
-                };
+                let recv_bytes = unsafe { std::slice::from_raw_parts(recv_buf[0].as_ptr(), size) };
 
-                let ip_header_len = ((recv_bytes[0] & 0x0F) as usize) * 4;
+                let ip_header_len = recv_bytes
+                    .get(0)
+                    .map(|b| ((b & 0x0F) as usize) * 4)
+                    .unwrap_or(IPV4_HEADER_MIN);
                 if size < ip_header_len + 8 {
                     continue; // Not enough data for ICMP header
                 }
@@ -200,7 +206,10 @@ fn ping_host_blocking(ip: Ipv4Addr, timeout_ms: u64) -> Result<Option<u8>, ScanE
                             if echo_reply.get_identifier() == identifier
                                 && echo_reply.get_sequence_number() == sequence_number
                             {
-                                return Ok(Some(recv_bytes[8])); // It's our reply! Return the TTL
+                                // Return the TTL (IPv4 header offset 8) only if present.
+                                if let Some(&ttl) = recv_bytes.get(8) {
+                                    return Ok(Some(ttl)); // It's our reply!
+                                }
                             }
                         }
                     }
@@ -247,9 +256,8 @@ pub fn check_icmp_privileges() -> Result<(), ScanError> {
 /// Linux privilege check: root or CAP_NET_RAW
 #[cfg(target_os = "linux")]
 fn check_privileges_impl() -> Result<(), ScanError> {
-    let status = std::fs::read_to_string("/proc/self/status").map_err(|e| {
-        ScanError::NetworkError(format!("Failed to read /proc/self/status: {}", e))
-    })?;
+    let status = std::fs::read_to_string("/proc/self/status")
+        .map_err(|e| ScanError::NetworkError(format!("Failed to read /proc/self/status: {}", e)))?;
 
     let mut is_root = false;
     let mut has_cap_net_raw = false;
@@ -379,7 +387,10 @@ pub async fn icmp_ping_sweep(
     emit_log(
         &event_tx,
         "info",
-        &format!("Starting ICMP ping sweep for {} hosts (max {} concurrent)", total, max_concurrent),
+        &format!(
+            "Starting ICMP ping sweep for {} hosts (max {} concurrent)",
+            total, max_concurrent
+        ),
         None,
     );
 
@@ -456,7 +467,11 @@ pub async fn icmp_ping_sweep(
                         None
                     }
                     Err(join_err) => {
-                        tracing::warn!("ICMP spawn_blocking join error for {}: {}", ip_str, join_err);
+                        tracing::warn!(
+                            "ICMP spawn_blocking join error for {}: {}",
+                            ip_str,
+                            join_err
+                        );
                         None
                     }
                 };
@@ -549,12 +564,11 @@ mod tests {
         let parsed = IcmpPacket::new(&buffer[..]).expect("Should parse ICMP packet");
         assert_eq!(parsed.get_icmp_type(), IcmpTypes::EchoRequest);
 
-        let echo =
-            EchoReplyPacket::new(parsed.payload()).or_else(|| {
-                // EchoReplyPacket and EchoRequestPacket have the same layout,
-                // so we can parse the request as a reply for verification
-                EchoReplyPacket::new(parsed.payload())
-            });
+        let echo = EchoReplyPacket::new(parsed.payload()).or_else(|| {
+            // EchoReplyPacket and EchoRequestPacket have the same layout,
+            // so we can parse the request as a reply for verification
+            EchoReplyPacket::new(parsed.payload())
+        });
         // The echo request payload should be parseable
         assert!(echo.is_some(), "Should be able to parse echo payload");
         if let Some(echo) = echo {
@@ -569,15 +583,15 @@ mod tests {
 
         {
             let echo_buf = &mut buffer[4..];
-            let mut echo = MutableEchoRequestPacket::new(echo_buf)
-                .expect("Buffer should be large enough");
+            let mut echo =
+                MutableEchoRequestPacket::new(echo_buf).expect("Buffer should be large enough");
             echo.set_identifier(42);
             echo.set_sequence_number(1);
         }
 
         {
-            let mut icmp = MutableIcmpPacket::new(&mut buffer[..])
-                .expect("Buffer should be large enough");
+            let mut icmp =
+                MutableIcmpPacket::new(&mut buffer[..]).expect("Buffer should be large enough");
             icmp.set_icmp_type(IcmpTypes::EchoRequest);
             icmp.set_icmp_code(IcmpCode::new(0));
             let csum = pnet_packet::util::checksum(icmp.packet(), 1);
