@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::network::banner::BannerResult;
 use crate::network::cve::CveMatch;
 use crate::network::privileges::PrivilegeStatus;
-use crate::types::Device;
+use crate::types::{Device, Finding};
 
 /// Events sent from the backend scanning engine to the Iced UI
 ///
@@ -55,6 +55,9 @@ pub enum AppEvent {
     /// A CVE match was found for a grabbed banner.
     CveAlert(CveMatch),
 
+    /// A normalized security finding was found.
+    FindingFound(Finding),
+
     // ---- Privilege Events ----
     /// Privilege status report (emmited at startup and on-demmand)
     PrivilegeStatus(PrivilegeStatus),
@@ -98,6 +101,9 @@ pub enum ScanEvent {
 
     /// A CVE alert was triggered.
     CveAlert(CveMatch),
+
+    /// A normalized security finding was found.
+    FindingFound(Finding),
 
     /// Scan finished (Ok on success, Err with reason on failure/cancellation).
     Finished(Result<ScanSummary, String>),

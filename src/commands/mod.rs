@@ -12,6 +12,7 @@ pub mod network;
 pub mod platform;
 pub mod privilege;
 pub mod scan;
+pub mod scan_store;
 pub mod scheduler;
 pub mod settings;
 
@@ -62,6 +63,13 @@ pub use platform::get_platform_capabilities;
 // Re-export scan commands
 pub use scan::{get_scan_results, pause_scan, resume_scan, start_scan, stop_scan};
 
+// Re-export scan store commands
+pub use scan_store::{
+    begin_scan_session, complete_scan_session, delete_scan_session, get_stored_scan_device,
+    initialize_scan_store, list_scan_devices, list_scan_sessions, load_scan_devices,
+    update_scan_progress, upsert_scan_device, upsert_scan_finding,
+};
+
 // Re-export export commands
 pub use export::export_audit_report;
 
@@ -77,7 +85,10 @@ pub use history::{
 };
 
 // Re-export baseline commands
-pub use baseline::{compare_baseline, delete_baseline, get_baselines, save_baseline};
+pub use baseline::{
+    compare_baseline, compare_baseline_with_scan_store, delete_baseline, get_baselines,
+    save_baseline, save_baseline_from_scan_store,
+};
 
 // Re-export privilege command
 pub use privilege::check_privilege_status;

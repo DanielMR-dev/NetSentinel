@@ -65,6 +65,7 @@ pub async fn discover_mdns() -> Result<Vec<Device>, ScanError> {
                         banner_results: vec![],
                         active_checks: vec![],
                         web_audits: vec![],
+                        findings: vec![],
                     });
                 }
             }
@@ -133,6 +134,7 @@ pub async fn discover_netbios(broadcast_ip: Ipv4Addr) -> Result<Vec<Device>, Sca
                         banner_results: vec![],
                         active_checks: Vec::new(),
                         web_audits: Vec::new(),
+                        findings: Vec::new(),
                     });
                 }
             }

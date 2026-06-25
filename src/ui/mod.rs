@@ -26,7 +26,7 @@ use crate::network::cve::CveMatch;
 use crate::network::privileges::PrivilegeStatus;
 use crate::settings::SettingsProfile;
 use crate::state::SharedScanState;
-use crate::types::{Device, ScanType};
+use crate::types::{Device, Finding, FindingSeverity, ScanType};
 
 pub mod theme;
 pub mod views;
@@ -76,6 +76,7 @@ pub enum SortField {
     Vendor,
     Hostname,
     OpenPorts,
+    Findings,
     LastSeen,
 }
 
@@ -130,6 +131,7 @@ pub enum Message {
         timestamp: i64,
     },
     CveAlertReceived(CveMatch),
+    FindingReceived(Finding),
     ScanStartResult(Result<String, String>),
     ScanStopResult(Result<(), String>),
 
@@ -189,6 +191,7 @@ pub enum Message {
     SearchQueryChanged(String),
     FilterStatusChanged(String),
     FilterHasOpenPortsToggled(bool),
+    FilterHasFindingsToggled(bool),
     SortTableBy(SortField),
     ClearFilters,
     ToggleTheme,
@@ -207,6 +210,15 @@ pub struct ScanLogEntry {
     pub message: String,
     pub target: Option<String>,
     pub timestamp: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FindingCounts {
+    pub critical: usize,
+    pub high: usize,
+    pub medium: usize,
+    pub low: usize,
+    pub info: usize,
 }
 
 // ── Application Model ───────────────────────────────────────────────────
@@ -239,6 +251,9 @@ pub struct NetSentinelApp {
     scan_total: u32,
     scan_current_target: String,
     discovered_devices: Vec<Device>,
+    findings: Vec<Finding>,
+    selected_finding: Option<Finding>,
+    finding_counts: FindingCounts,
     scan_logs: Vec<ScanLogEntry>,
     selected_device: Option<Device>,
 
@@ -246,6 +261,7 @@ pub struct NetSentinelApp {
     pub search_query: String,
     pub filter_status: String,
     pub filter_has_open_ports: bool,
+    pub filter_has_findings: bool,
     pub sort_field: SortField,
     pub sort_direction: SortDirection,
     pub filtered_devices: Vec<Device>,
@@ -304,11 +320,15 @@ impl NetSentinelApp {
             scan_total: 0,
             scan_current_target: String::new(),
             discovered_devices: Vec::new(),
+            findings: Vec::new(),
+            selected_finding: None,
+            finding_counts: FindingCounts::default(),
             scan_logs: Vec::new(),
             selected_device: None,
             search_query: String::new(),
             filter_status: "all".to_string(),
             filter_has_open_ports: false,
+            filter_has_findings: false,
             sort_field: SortField::Ip,
             sort_direction: SortDirection::Asc,
             filtered_devices: Vec::new(),
@@ -370,6 +390,15 @@ impl NetSentinelApp {
                         .as_ref()
                         .map(|v| v.to_lowercase().contains(&query))
                         .unwrap_or(false)
+                    || d.findings.iter().any(|finding| {
+                        finding.title.to_lowercase().contains(&query)
+                            || finding.description.to_lowercase().contains(&query)
+                            || finding
+                                .cve
+                                .as_ref()
+                                .map(|cve| cve.cve_id.to_lowercase().contains(&query))
+                                .unwrap_or(false)
+                    })
             });
         }
 
@@ -389,6 +418,10 @@ impl NetSentinelApp {
                     .iter()
                     .any(|p| format!("{:?}", p.state).to_lowercase() == "open")
             });
+        }
+
+        if self.filter_has_findings {
+            devices.retain(|d| !d.findings.is_empty());
         }
 
         // 4. Sort
@@ -427,6 +460,7 @@ impl NetSentinelApp {
                         .count();
                     a_open.cmp(&b_open)
                 }
+                SortField::Findings => a.findings.len().cmp(&b.findings.len()),
                 SortField::LastSeen => a.last_seen.cmp(&b.last_seen),
             };
 
@@ -437,6 +471,138 @@ impl NetSentinelApp {
         });
 
         self.filtered_devices = devices;
+    }
+
+    fn attach_cached_findings_to_device(&self, device: &mut Device) {
+        for finding in self
+            .findings
+            .iter()
+            .filter(|finding| finding.ip == device.ip)
+        {
+            if !device
+                .findings
+                .iter()
+                .any(|existing| existing.id == finding.id)
+            {
+                device.findings.push(finding.clone());
+            }
+        }
+    }
+
+    fn merge_device(&mut self, mut device: Device) {
+        self.attach_cached_findings_to_device(&mut device);
+        if let Some(existing) = self
+            .discovered_devices
+            .iter_mut()
+            .find(|existing| existing.ip == device.ip)
+        {
+            *existing = device;
+        } else {
+            self.discovered_devices.push(device);
+        }
+        self.rebuild_findings_cache();
+        self.update_selected_device_snapshot();
+        self.update_filtered_devices();
+    }
+
+    fn merge_devices(&mut self, devices: Vec<Device>) {
+        for mut device in devices {
+            self.attach_cached_findings_to_device(&mut device);
+            if let Some(existing) = self
+                .discovered_devices
+                .iter_mut()
+                .find(|existing| existing.ip == device.ip)
+            {
+                *existing = device;
+            } else {
+                self.discovered_devices.push(device);
+            }
+        }
+        self.rebuild_findings_cache();
+        self.update_selected_device_snapshot();
+        self.update_filtered_devices();
+    }
+
+    fn merge_finding(&mut self, finding: Finding) {
+        if !self
+            .findings
+            .iter()
+            .any(|existing| existing.id == finding.id)
+        {
+            self.findings.push(finding.clone());
+        }
+
+        if let Some(device) = self
+            .discovered_devices
+            .iter_mut()
+            .find(|device| device.ip == finding.ip)
+        {
+            if !device
+                .findings
+                .iter()
+                .any(|existing| existing.id == finding.id)
+            {
+                device.findings.push(finding.clone());
+            }
+        }
+
+        if let Some(device) = self.selected_device.as_mut() {
+            if device.ip == finding.ip
+                && !device
+                    .findings
+                    .iter()
+                    .any(|existing| existing.id == finding.id)
+            {
+                device.findings.push(finding);
+            }
+        }
+
+        self.refresh_finding_counts();
+        self.update_filtered_devices();
+    }
+
+    fn rebuild_findings_cache(&mut self) {
+        let mut findings = Vec::new();
+        for device in &self.discovered_devices {
+            for finding in &device.findings {
+                if !findings
+                    .iter()
+                    .any(|existing: &Finding| existing.id == finding.id)
+                {
+                    findings.push(finding.clone());
+                }
+            }
+        }
+        self.findings = findings;
+        self.refresh_finding_counts();
+    }
+
+    fn refresh_finding_counts(&mut self) {
+        let mut counts = FindingCounts::default();
+        for finding in &self.findings {
+            match &finding.severity {
+                FindingSeverity::Critical => counts.critical += 1,
+                FindingSeverity::High => counts.high += 1,
+                FindingSeverity::Medium => counts.medium += 1,
+                FindingSeverity::Low => counts.low += 1,
+                FindingSeverity::Info => counts.info += 1,
+            }
+        }
+        self.finding_counts = counts;
+    }
+
+    fn update_selected_device_snapshot(&mut self) {
+        let selected_ip = self
+            .selected_device
+            .as_ref()
+            .map(|device| device.ip.clone());
+        if let Some(ip) = selected_ip {
+            self.selected_device = self
+                .discovered_devices
+                .iter()
+                .find(|device| device.ip == ip)
+                .cloned();
+        }
     }
 
     /// Handle state updates and dispatch async commands
@@ -511,6 +677,9 @@ impl NetSentinelApp {
                 self.scan_progress = 0.0;
                 self.scan_scanned = 0;
                 self.discovered_devices.clear();
+                self.findings.clear();
+                self.selected_finding = None;
+                self.finding_counts = FindingCounts::default();
                 self.filtered_devices.clear();
                 self.scan_logs.clear();
                 self.selected_device = None;
@@ -601,14 +770,12 @@ impl NetSentinelApp {
 
             // ── Scan Events ─────────────────────────────────────────────
             Message::DeviceDiscovered(device) => {
-                self.discovered_devices.push(device);
-                self.update_filtered_devices();
+                self.merge_device(device);
                 Task::none()
             }
 
             Message::DevicesDiscovered(devices) => {
-                self.discovered_devices.extend(devices);
-                self.update_filtered_devices();
+                self.merge_devices(devices);
                 Task::none()
             }
 
@@ -648,21 +815,26 @@ impl NetSentinelApp {
                 self.is_scanning = false;
                 self.is_paused = false;
                 self.scan_progress = 1.0;
+                self.discovered_devices = devices.clone();
+                self.rebuild_findings_cache();
                 // Clear the receiver synchronously
                 if let Ok(mut guard) = self.event_rx.try_lock() {
                     *guard = None;
                 }
+                self.update_selected_device_snapshot();
                 self.update_filtered_devices();
 
                 // Persist scan to history automatically, then reload history
                 let cidr = self.scan_cidr.clone();
                 let entry = crate::history::ScanHistoryEntry {
                     id: uuid::Uuid::new_v4().to_string(),
+                    scan_store_id: Some(scan_id.clone()),
                     scan_id,
                     cidr,
                     device_count,
                     duration_ms,
                     status,
+                    devices_truncated: devices.len() > 100,
                     devices,
                     timestamp: chrono::Utc::now().timestamp(),
                 };
@@ -701,6 +873,11 @@ impl NetSentinelApp {
 
             Message::CveAlertReceived(cve) => {
                 self.cve_alerts.push(cve);
+                Task::none()
+            }
+
+            Message::FindingReceived(finding) => {
+                self.merge_finding(finding);
                 Task::none()
             }
 
@@ -751,6 +928,11 @@ impl NetSentinelApp {
                 self.update_filtered_devices();
                 Task::none()
             }
+            Message::FilterHasFindingsToggled(val) => {
+                self.filter_has_findings = val;
+                self.update_filtered_devices();
+                Task::none()
+            }
             Message::SortTableBy(field) => {
                 if self.sort_field == field {
                     self.sort_direction = match self.sort_direction {
@@ -768,6 +950,7 @@ impl NetSentinelApp {
                 self.search_query.clear();
                 self.filter_status = "all".to_string();
                 self.filter_has_open_ports = false;
+                self.filter_has_findings = false;
                 self.update_filtered_devices();
                 Task::none()
             }
@@ -1121,9 +1304,14 @@ impl NetSentinelApp {
                             .save_file()
                             .await
                         {
-                            crate::reporting::export::generate_html_report(&devices, path.path())
-                                .map(|_| true)
-                                .map_err(|e| e.to_string())
+                            let path = path.path().to_path_buf();
+                            tokio::task::spawn_blocking(move || {
+                                crate::reporting::export::generate_html_report(&devices, &path)
+                                    .map_err(|e| e.to_string())
+                            })
+                            .await
+                            .map_err(|e| format!("HTML export task failed: {}", e))??;
+                            Ok(true)
                         } else {
                             Ok(false)
                         }
@@ -1142,9 +1330,14 @@ impl NetSentinelApp {
                             .save_file()
                             .await
                         {
-                            crate::reporting::export::generate_pdf_report(&devices, path.path())
-                                .map(|_| true)
-                                .map_err(|e| e.to_string())
+                            let path = path.path().to_path_buf();
+                            tokio::task::spawn_blocking(move || {
+                                crate::reporting::export::generate_pdf_report(&devices, &path)
+                                    .map_err(|e| e.to_string())
+                            })
+                            .await
+                            .map_err(|e| format!("PDF export task failed: {}", e))??;
+                            Ok(true)
                         } else {
                             Ok(false)
                         }
@@ -1434,6 +1627,11 @@ impl NetSentinelApp {
                                             break;
                                         }
                                     }
+                                    Some(AppEvent::FindingFound(finding)) => {
+                                        if output.send(Message::FindingReceived(finding)).await.is_err() {
+                                            break;
+                                        }
+                                    }
                                     Some(_) => {} // Ignore other events for IPC
                                     None => break, // Channel closed
                                 }
@@ -1441,7 +1639,6 @@ impl NetSentinelApp {
                         }
                     }
                 }
-                std::future::pending::<()>().await;
             }),
         ));
 
@@ -1488,6 +1685,9 @@ impl NetSentinelApp {
                                         Some(AppEvent::CveAlert(cve)) => {
                                             if output.send(Message::CveAlertReceived(cve)).await.is_err() { break; }
                                         }
+                                        Some(AppEvent::FindingFound(finding)) => {
+                                            if output.send(Message::FindingReceived(finding)).await.is_err() { break; }
+                                        }
                                         Some(_) => {}
                                         None => break,
                                     }
@@ -1495,7 +1695,6 @@ impl NetSentinelApp {
                             }
                         }
                     }
-                    std::future::pending::<()>().await;
                 }),
             ));
         }

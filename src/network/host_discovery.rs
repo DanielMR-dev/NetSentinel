@@ -1,4 +1,5 @@
 use std::net::IpAddr;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -58,6 +59,7 @@ pub async fn discover_hosts(
     cancel_rx: tokio::sync::oneshot::Receiver<()>,
     max_concurrent: usize,
     retry_count: u32,
+    shared_scanned: Option<Arc<AtomicU32>>,
 ) -> Result<Vec<Device>, ScanError> {
     let mut cancel_rx = cancel_rx;
     let effective_concurrency = if max_concurrent == 0 {
@@ -103,11 +105,15 @@ pub async fn discover_hosts(
                 let event_tx = event_tx.clone();
                 let found = found_devices.clone();
                 let scanned = scanned.clone();
+                let shared_scanned = shared_scanned.clone();
 
                 async move {
                     let _permit = sem.acquire().await.ok();
 
-                    let current = scanned.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                    let current = scanned.fetch_add(1, Ordering::SeqCst) + 1;
+                    if let Some(shared_scanned) = shared_scanned {
+                        shared_scanned.store(current, Ordering::SeqCst);
+                    }
 
                     // Update current target
                     let target_str = ip.to_string();

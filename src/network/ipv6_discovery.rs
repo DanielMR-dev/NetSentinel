@@ -192,6 +192,7 @@ pub async fn discover_ipv6_hosts(
                                         banner_results: vec![],
                                         active_checks: vec![],
                                         web_audits: vec![],
+                                        findings: vec![],
                                     });
                                 }
                             }

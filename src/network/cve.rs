@@ -24,7 +24,7 @@ pub enum CveSeverity {
 }
 
 /// A CVE match result with full vulnerability details.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CveMatch {
     /// CVE identifier (e.g., "CVE-2024-12345")
@@ -236,6 +236,15 @@ pub fn lookup_cves(banner_result: &banner::BannerResult) -> Vec<CveMatch> {
         &banner_result.ip,
         banner_result.port,
     )
+}
+
+/// Look up CVEs for a banner result without blocking an async worker thread.
+pub async fn lookup_cves_async(
+    banner_result: banner::BannerResult,
+) -> Result<Vec<CveMatch>, ScanError> {
+    tokio::task::spawn_blocking(move || lookup_cves(&banner_result))
+        .await
+        .map_err(|e| ScanError::Internal(format!("CVE lookup task failed: {}", e)))
 }
 
 /// Update the CVE database by replacing the SQLite DB file.

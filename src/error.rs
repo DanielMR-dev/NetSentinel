@@ -91,6 +91,9 @@ pub enum ScanError {
     #[error("Baseline error: {0}")]
     BaselineError(String),
 
+    #[error("Scan store error: {0}")]
+    ScanStoreError(String),
+
     #[error("Baseline not found: {0}")]
     BaselineNotFound(String),
 
@@ -139,7 +142,7 @@ impl From<serde_json::Error> for ScanError {
 
 impl From<rusqlite::Error> for ScanError {
     fn from(err: rusqlite::Error) -> Self {
-        ScanError::BaselineError(err.to_string())
+        ScanError::ScanStoreError(err.to_string())
     }
 }
 

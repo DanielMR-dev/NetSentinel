@@ -9,6 +9,7 @@ use crate::baseline::{compute_diff, Baseline, BaselineDiff, BaselineStore};
 use crate::commands::settings::get_config_dir;
 use crate::error::ScanError;
 use crate::network::sanitize;
+use crate::scan_store::ScanStore;
 use crate::state::SharedScanState;
 
 /// Save a network baseline snapshot.
@@ -73,4 +74,56 @@ pub async fn compare_baseline(
     let diff = compute_diff(&baseline, &current_devices);
 
     Ok(diff)
+}
+
+/// Save a baseline using devices persisted for a scan store session.
+pub async fn save_baseline_from_scan_store(
+    scan_id: String,
+    name: String,
+    description: Option<String>,
+    scan_cidr: String,
+) -> Result<String, ScanError> {
+    let validated_scan_id = sanitize::validate_id(&scan_id)?;
+    let _name = sanitize::validate_name(&name)?;
+    let _cidr = sanitize::validate_cidr(&scan_cidr)?;
+
+    let config_dir = get_config_dir()?;
+    let scan_store = ScanStore::new(config_dir.clone());
+    let devices = scan_store.load_all_devices(validated_scan_id).await?;
+
+    let baseline = Baseline {
+        id: uuid::Uuid::new_v4().to_string(),
+        name,
+        description,
+        devices,
+        scan_cidr,
+        created_at: chrono::Utc::now().timestamp(),
+    };
+
+    let store = BaselineStore::new(config_dir);
+    tokio::task::spawn_blocking(move || store.save_blocking(&baseline))
+        .await
+        .map_err(|e| ScanError::BaselineError(format!("Baseline save task failed: {}", e)))?
+}
+
+/// Compare a baseline against devices persisted for a scan store session.
+pub async fn compare_baseline_with_scan_store(
+    baseline_id: String,
+    scan_id: String,
+) -> Result<BaselineDiff, ScanError> {
+    let validated_baseline_id = sanitize::validate_id(&baseline_id)?;
+    let validated_scan_id = sanitize::validate_id(&scan_id)?;
+
+    let config_dir = get_config_dir()?;
+    let baseline_store = BaselineStore::new(config_dir.clone());
+    let baseline = tokio::task::spawn_blocking(move || {
+        baseline_store.get_by_id_blocking(&validated_baseline_id)
+    })
+    .await
+    .map_err(|e| ScanError::BaselineError(format!("Baseline load task failed: {}", e)))??;
+
+    let scan_store = ScanStore::new(config_dir);
+    let current_devices = scan_store.load_all_devices(validated_scan_id).await?;
+
+    Ok(compute_diff(&baseline, &current_devices))
 }

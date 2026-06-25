@@ -14,6 +14,7 @@ use crate::types::Device;
 
 /// Maximum number of history entries retained on disk.
 const MAX_HISTORY_ENTRIES: usize = 100;
+const MAX_HISTORY_DEVICE_PREVIEW: usize = 100;
 
 /// A saved scan history entry.
 ///
@@ -28,6 +29,10 @@ pub struct ScanHistoryEntry {
     pub device_count: u32,
     pub duration_ms: u64,
     pub status: String,
+    #[serde(default)]
+    pub scan_store_id: Option<String>,
+    #[serde(default)]
+    pub devices_truncated: bool,
     pub devices: Vec<Device>,
     pub timestamp: i64,
 }
@@ -123,13 +128,18 @@ impl HistoryStore {
     ///
     /// If the store exceeds `MAX_HISTORY_ENTRIES` after insertion, the
     /// oldest entries (by timestamp) are evicted.
-    pub async fn add_entry(&self, entry: ScanHistoryEntry) -> Result<(), ScanError> {
+    pub async fn add_entry(&self, mut entry: ScanHistoryEntry) -> Result<(), ScanError> {
         info!(
             id = %entry.id,
             scan_id = %entry.scan_id,
             cidr = %entry.cidr,
             "Adding scan history entry"
         );
+
+        if entry.devices.len() > MAX_HISTORY_DEVICE_PREVIEW {
+            entry.devices.truncate(MAX_HISTORY_DEVICE_PREVIEW);
+            entry.devices_truncated = true;
+        }
 
         let mut entries = self.load().await?;
         entries.push(entry);
@@ -191,6 +201,8 @@ mod tests {
             device_count: 3,
             duration_ms: 1500,
             status: "completed".to_string(),
+            scan_store_id: None,
+            devices_truncated: false,
             devices: vec![Device {
                 ip: "192.168.1.1".to_string(),
                 mac: "AA:BB:CC:DD:EE:FF".to_string(),
@@ -203,6 +215,7 @@ mod tests {
                 banner_results: Vec::new(),
                 active_checks: Vec::new(),
                 web_audits: Vec::new(),
+                findings: Vec::new(),
             }],
             timestamp,
         }
@@ -362,5 +375,39 @@ mod tests {
             !json.contains("\"duration_ms\""),
             "Should not contain duration_ms"
         );
+    }
+
+    #[test]
+    fn test_legacy_history_entry_defaults_scan_store_fields() {
+        let json = r#"{
+            "id":"legacy",
+            "scanId":"scan-legacy",
+            "cidr":"192.168.1.0/24",
+            "deviceCount":0,
+            "durationMs":10,
+            "status":"completed",
+            "devices":[],
+            "timestamp":1000
+        }"#;
+
+        let entry: ScanHistoryEntry = serde_json::from_str(json).expect("legacy deserialize");
+        assert_eq!(entry.scan_store_id, None);
+        assert!(!entry.devices_truncated);
+    }
+
+    #[tokio::test]
+    async fn test_add_entry_caps_device_preview() {
+        let tmp = tempfile::tempdir().expect("create tempdir");
+        let store = make_store(tmp.path());
+        let mut entry = make_entry("large", 1000);
+        entry.devices = (0..125)
+            .map(|idx| Device::new(format!("192.168.1.{}", idx)))
+            .collect();
+
+        store.add_entry(entry).await.expect("add large entry");
+
+        let loaded = store.load().await.expect("load");
+        assert_eq!(loaded[0].devices.len(), MAX_HISTORY_DEVICE_PREVIEW);
+        assert!(loaded[0].devices_truncated);
     }
 }

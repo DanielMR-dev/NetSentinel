@@ -14,10 +14,13 @@ pub struct SharedScanState {
     pub devices: Arc<Mutex<HashMap<String, Device>>>,
     pub scanned_count: Arc<AtomicU32>,
     pub total_hosts: Arc<AtomicU32>,
+    pub persisted_device_count: Arc<AtomicU32>,
     pub is_paused: AtomicBool,
     pub is_running: AtomicBool,
+    pub cancel_requested: AtomicBool,
     pub cancel_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
     pub current_target: Arc<Mutex<Option<String>>>,
+    pub current_scan_id: Arc<Mutex<Option<String>>>,
 }
 
 impl Default for SharedScanState {
@@ -32,10 +35,13 @@ impl SharedScanState {
             devices: Arc::new(Mutex::new(HashMap::new())),
             scanned_count: Arc::new(AtomicU32::new(0)),
             total_hosts: Arc::new(AtomicU32::new(0)),
+            persisted_device_count: Arc::new(AtomicU32::new(0)),
             is_paused: AtomicBool::new(false),
             is_running: AtomicBool::new(false),
+            cancel_requested: AtomicBool::new(false),
             cancel_tx: Arc::new(Mutex::new(None)),
             current_target: Arc::new(Mutex::new(None)),
+            current_scan_id: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -43,13 +49,29 @@ impl SharedScanState {
         self.devices.lock().await.clear();
         self.scanned_count.store(0, Ordering::SeqCst);
         self.total_hosts.store(0, Ordering::SeqCst);
+        self.persisted_device_count.store(0, Ordering::SeqCst);
         self.is_paused.store(false, Ordering::SeqCst);
         self.is_running.store(false, Ordering::SeqCst);
+        self.cancel_requested.store(false, Ordering::SeqCst);
         *self.cancel_tx.lock().await = None;
         *self.current_target.lock().await = None;
+        *self.current_scan_id.lock().await = None;
+    }
+
+    pub async fn reset_for_new_scan(&self) {
+        self.devices.lock().await.clear();
+        self.scanned_count.store(0, Ordering::SeqCst);
+        self.total_hosts.store(0, Ordering::SeqCst);
+        self.persisted_device_count.store(0, Ordering::SeqCst);
+        self.is_paused.store(false, Ordering::SeqCst);
+        self.cancel_requested.store(false, Ordering::SeqCst);
+        *self.cancel_tx.lock().await = None;
+        *self.current_target.lock().await = None;
+        *self.current_scan_id.lock().await = None;
     }
 
     pub async fn set_cancelled(&self) {
+        self.cancel_requested.store(true, Ordering::SeqCst);
         let maybe_tx = self.cancel_tx.lock().await.take();
         if let Some(tx) = maybe_tx {
             let _ = tx.send(());
@@ -80,8 +102,24 @@ impl SharedScanState {
         self.total_hosts.store(total, Ordering::SeqCst);
     }
 
+    pub fn get_persisted_device_count(&self) -> u32 {
+        self.persisted_device_count.load(Ordering::SeqCst)
+    }
+
+    pub fn set_persisted_device_count(&self, total: u32) {
+        self.persisted_device_count.store(total, Ordering::SeqCst);
+    }
+
     pub async fn set_current_target(&self, target: Option<String>) {
         *self.current_target.lock().await = target;
+    }
+
+    pub async fn set_current_scan_id(&self, scan_id: Option<String>) {
+        *self.current_scan_id.lock().await = scan_id;
+    }
+
+    pub async fn current_scan_id(&self) -> Option<String> {
+        self.current_scan_id.lock().await.clone()
     }
 
     pub fn set_paused(&self, paused: bool) {
@@ -98,6 +136,16 @@ impl SharedScanState {
 
     pub fn set_running(&self, running: bool) {
         self.is_running.store(running, Ordering::SeqCst);
+    }
+
+    pub fn try_start_running(&self) -> bool {
+        self.is_running
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    }
+
+    pub fn is_cancel_requested(&self) -> bool {
+        self.cancel_requested.load(Ordering::SeqCst)
     }
 
     pub async fn set_cancel_tx(&self, tx: tokio::sync::oneshot::Sender<()>) {

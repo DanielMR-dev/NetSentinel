@@ -1,6 +1,223 @@
 use serde::{Deserialize, Serialize};
 
 use crate::network::banner::BannerResult;
+use crate::network::cve::{CveMatch, CveSeverity};
+
+/// Source subsystem that produced a finding.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum FindingSource {
+    Cve,
+    ActiveCheck,
+    WebAudit,
+}
+
+/// Normalized finding severity used across CVE, active check, and web audit results.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum FindingSeverity {
+    Critical,
+    High,
+    Medium,
+    Low,
+    Info,
+}
+
+/// Confidence level for a normalized finding.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum FindingConfidence {
+    Confirmed,
+    High,
+    Medium,
+    Low,
+}
+
+/// CVE-specific details attached to normalized findings.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CveFindingDetails {
+    pub cve_id: String,
+    pub affected_software: String,
+    pub affected_versions: Vec<String>,
+    pub cvss_score: f64,
+}
+
+/// Unified security finding attached to a device.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Finding {
+    pub id: String,
+    pub source: FindingSource,
+    pub severity: FindingSeverity,
+    pub confidence: FindingConfidence,
+    pub title: String,
+    pub description: String,
+    pub ip: String,
+    pub port: Option<u16>,
+    pub service: Option<String>,
+    pub evidence: Option<String>,
+    pub cve: Option<CveFindingDetails>,
+    pub timestamp: i64,
+}
+
+impl Finding {
+    pub fn from_cve(cve: &CveMatch) -> Self {
+        Self {
+            id: stable_finding_id(&[
+                "cve",
+                &cve.ip,
+                &cve.port.to_string(),
+                &cve.cve_id.to_lowercase(),
+            ]),
+            source: FindingSource::Cve,
+            severity: FindingSeverity::from(&cve.severity),
+            confidence: FindingConfidence::Medium,
+            title: cve.cve_id.clone(),
+            description: cve.description.clone(),
+            ip: cve.ip.clone(),
+            port: Some(cve.port),
+            service: Some(cve.affected_software.clone()),
+            evidence: Some(format!("CVSS {:.1}", cve.cvss_score)),
+            cve: Some(CveFindingDetails {
+                cve_id: cve.cve_id.clone(),
+                affected_software: cve.affected_software.clone(),
+                affected_versions: cve.affected_versions.clone(),
+                cvss_score: cve.cvss_score,
+            }),
+            timestamp: chrono::Utc::now().timestamp(),
+        }
+    }
+
+    pub fn from_active_check(
+        ip: &str,
+        check: &crate::network::active_checks::ActiveCheckResult,
+    ) -> Option<Self> {
+        if !check.is_vulnerable {
+            return None;
+        }
+
+        Some(Self {
+            id: stable_finding_id(&["active", ip, &check.vulnerability_name.to_lowercase()]),
+            source: FindingSource::ActiveCheck,
+            severity: FindingSeverity::High,
+            confidence: FindingConfidence::Confirmed,
+            title: check.vulnerability_name.clone(),
+            description: check
+                .details
+                .clone()
+                .unwrap_or_else(|| "Active check confirmed vulnerable behavior".to_string()),
+            ip: ip.to_string(),
+            port: None,
+            service: None,
+            evidence: check.details.clone(),
+            cve: None,
+            timestamp: chrono::Utc::now().timestamp(),
+        })
+    }
+
+    pub fn from_web_audit(audit: &crate::network::web_audit::WebAuditResult) -> Vec<Self> {
+        let (ip, port) = parse_web_audit_target(&audit.url);
+        let mut findings = Vec::new();
+
+        if !audit.exposed_directories.is_empty() {
+            findings.push(Self {
+                id: stable_finding_id(&[
+                    "web",
+                    &ip,
+                    &port.map(|p| p.to_string()).unwrap_or_default(),
+                    "exposed-directories",
+                    &audit.exposed_directories.join("|").to_lowercase(),
+                ]),
+                source: FindingSource::WebAudit,
+                severity: FindingSeverity::Medium,
+                confidence: FindingConfidence::High,
+                title: "Exposed web paths".to_string(),
+                description: "Sensitive web paths responded successfully during audit".to_string(),
+                ip: ip.clone(),
+                port,
+                service: Some("http".to_string()),
+                evidence: Some(audit.exposed_directories.join(", ")),
+                cve: None,
+                timestamp: chrono::Utc::now().timestamp(),
+            });
+        }
+
+        if let Some(powered_by) = audit.powered_by_header.as_ref() {
+            findings.push(Self {
+                id: stable_finding_id(&[
+                    "web",
+                    &ip,
+                    &port.map(|p| p.to_string()).unwrap_or_default(),
+                    "x-powered-by",
+                    &powered_by.to_lowercase(),
+                ]),
+                source: FindingSource::WebAudit,
+                severity: FindingSeverity::Low,
+                confidence: FindingConfidence::High,
+                title: "Technology disclosure".to_string(),
+                description: "Web service exposes an X-Powered-By header".to_string(),
+                ip,
+                port,
+                service: Some("http".to_string()),
+                evidence: Some(powered_by.clone()),
+                cve: None,
+                timestamp: chrono::Utc::now().timestamp(),
+            });
+        }
+
+        findings
+    }
+}
+
+impl From<&CveSeverity> for FindingSeverity {
+    fn from(value: &CveSeverity) -> Self {
+        match value {
+            CveSeverity::Critical => FindingSeverity::Critical,
+            CveSeverity::High => FindingSeverity::High,
+            CveSeverity::Medium => FindingSeverity::Medium,
+            CveSeverity::Low => FindingSeverity::Low,
+        }
+    }
+}
+
+fn stable_finding_id(parts: &[&str]) -> String {
+    let joined = parts
+        .iter()
+        .map(|part| {
+            part.chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() {
+                        c.to_ascii_lowercase()
+                    } else {
+                        '-'
+                    }
+                })
+                .collect::<String>()
+                .trim_matches('-')
+                .to_string()
+        })
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(":");
+
+    if joined.is_empty() {
+        "finding:unknown".to_string()
+    } else {
+        joined
+    }
+}
+
+fn parse_web_audit_target(url: &str) -> (String, Option<u16>) {
+    let without_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
+    let authority = without_scheme.split('/').next().unwrap_or(without_scheme);
+
+    if let Some((host, port)) = authority.rsplit_once(':') {
+        return (host.to_string(), port.parse::<u16>().ok());
+    }
+
+    (authority.to_string(), None)
+}
 
 /// Scan type enumeration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -134,6 +351,9 @@ pub struct Device {
     pub active_checks: Vec<crate::network::active_checks::ActiveCheckResult>,
     /// Web auditing results for HTTP/HTTPS services found on this device
     pub web_audits: Vec<crate::network::web_audit::WebAuditResult>,
+    /// Unified security findings for this device
+    #[serde(default)]
+    pub findings: Vec<Finding>,
 }
 
 impl Device {
@@ -150,6 +370,7 @@ impl Device {
             banner_results: Vec::new(),
             active_checks: Vec::new(),
             web_audits: Vec::new(),
+            findings: Vec::new(),
         }
     }
 
@@ -181,6 +402,60 @@ impl Device {
     pub fn with_ports(mut self, ports: Vec<Port>) -> Self {
         self.ports = ports;
         self
+    }
+}
+
+#[cfg(test)]
+mod finding_tests {
+    use super::*;
+
+    #[test]
+    fn cve_constructor_uses_deterministic_id_and_severity() {
+        let cve = CveMatch {
+            cve_id: "CVE-2026-0001".to_string(),
+            severity: CveSeverity::Critical,
+            description: "Example issue".to_string(),
+            affected_software: "OpenSSH".to_string(),
+            affected_versions: vec!["< 9.0".to_string()],
+            cvss_score: 9.8,
+            ip: "192.0.2.10".to_string(),
+            port: 22,
+        };
+
+        let finding = Finding::from_cve(&cve);
+
+        assert_eq!(finding.id, "cve:192-0-2-10:22:cve-2026-0001");
+        assert_eq!(finding.severity, FindingSeverity::Critical);
+        assert_eq!(
+            finding.cve.as_ref().map(|d| d.cve_id.as_str()),
+            Some("CVE-2026-0001")
+        );
+    }
+
+    #[test]
+    fn device_json_without_findings_defaults_to_empty_vec() {
+        let json = r#"{
+            "ip":"192.0.2.20",
+            "mac":"",
+            "hostname":null,
+            "vendor":null,
+            "os":null,
+            "status":"Unknown",
+            "ports":[],
+            "last_seen":0,
+            "banner_results":[],
+            "active_checks":[],
+            "web_audits":[]
+        }"#;
+
+        let device_result: Result<Device, _> = serde_json::from_str(json);
+        assert!(device_result.is_ok());
+        let device = match device_result {
+            Ok(device) => device,
+            Err(_) => return,
+        };
+
+        assert!(device.findings.is_empty());
     }
 }
 

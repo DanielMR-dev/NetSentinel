@@ -7,6 +7,7 @@
 use iced::widget::{container, row, text};
 use iced::{Border, Color, Length, Theme};
 
+use crate::types::FindingSeverity;
 use crate::ui::theme::{DANGER, INFO, SUCCESS, SURFACE, TEXT, TEXT_MUTED, WARNING, WARNING_BG};
 
 /// Create a styled card container with optional title
@@ -74,6 +75,34 @@ pub fn port_badge<'a, Message: 'a>(
     row![container(text(label).color(TEXT).size(12))
         .padding([2, 6])
         .style(move |_theme: &Theme| badge_appearance(state_color)),]
+}
+
+/// Theme color for a finding severity.
+pub fn finding_severity_color(severity: &FindingSeverity) -> Color {
+    match severity {
+        FindingSeverity::Critical | FindingSeverity::High => DANGER,
+        FindingSeverity::Medium => WARNING,
+        FindingSeverity::Low => INFO,
+        FindingSeverity::Info => TEXT_MUTED,
+    }
+}
+
+/// Create a finding severity badge.
+pub fn finding_severity_badge<'a, Message: 'a>(
+    severity: &FindingSeverity,
+) -> container::Container<'a, Message> {
+    let color = finding_severity_color(severity);
+    container(text(format!("{:?}", severity)).color(TEXT).size(11))
+        .padding([2, 8])
+        .style(move |_theme: &Theme| badge_appearance(color))
+}
+
+/// Create a compact findings count badge.
+pub fn findings_count_badge<'a, Message: 'a>(count: usize) -> container::Container<'a, Message> {
+    let color = if count > 0 { WARNING } else { SURFACE };
+    container(text(count.to_string()).color(TEXT).size(11))
+        .padding([2, 8])
+        .style(move |_theme: &Theme| badge_appearance(color))
 }
 
 /// Create a loading spinner indicator (text-based for simplicity)

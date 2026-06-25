@@ -375,6 +375,7 @@ mod tests {
             banner_results: Vec::new(),
             active_checks: Vec::new(),
             web_audits: Vec::new(),
+            findings: Vec::new(),
         }
     }
 

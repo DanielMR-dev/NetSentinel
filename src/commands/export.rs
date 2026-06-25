@@ -4,14 +4,14 @@
 //! format using a native file dialog.
 
 use crate::error::ScanError;
-use crate::types::Device;
+use crate::types::{Device, FindingSeverity};
 use std::path::PathBuf;
 
 /// Helper function to convert Vec<Device> to a CSV string.
 fn devices_to_csv(devices: &[Device]) -> String {
     let mut csv = String::new();
     // Header
-    csv.push_str("IP,MAC,Hostname,Vendor,OS,Status,Open Ports,Vulnerabilities\n");
+    csv.push_str("IP,MAC,Hostname,Vendor,OS,Status,Open Ports,Findings,Critical Findings,High Findings,Medium Findings,Low Findings,Info Findings,Finding Titles\n");
     for dev in devices {
         // Escape helper for CSV values to ensure commas don't break columns
         let escape = |s: &str| -> String {
@@ -39,19 +39,41 @@ fn devices_to_csv(devices: &[Device]) -> String {
         }
         let ports_str = escape(&port_strings.join("; "));
 
-        // Format vulnerabilities
-        let mut cve_ids = Vec::new();
-        for banner in &dev.banner_results {
-            let cves = crate::network::cve::lookup_cves(banner);
-            for cve in cves {
-                cve_ids.push(format!("{} ({:?})", cve.cve_id, cve.severity));
+        let mut critical = 0usize;
+        let mut high = 0usize;
+        let mut medium = 0usize;
+        let mut low = 0usize;
+        let mut info = 0usize;
+        let mut finding_titles = Vec::new();
+
+        for finding in &dev.findings {
+            match &finding.severity {
+                FindingSeverity::Critical => critical += 1,
+                FindingSeverity::High => high += 1,
+                FindingSeverity::Medium => medium += 1,
+                FindingSeverity::Low => low += 1,
+                FindingSeverity::Info => info += 1,
             }
+            finding_titles.push(format!("{} ({:?})", finding.title, finding.severity));
         }
-        let cves_str = escape(&cve_ids.join("; "));
+        let findings_str = escape(&finding_titles.join("; "));
 
         csv.push_str(&format!(
-            "{},{},{},{},{},{},{},{}\n",
-            ip, mac, hostname, vendor, os, status, ports_str, cves_str
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+            ip,
+            mac,
+            hostname,
+            vendor,
+            os,
+            status,
+            ports_str,
+            dev.findings.len(),
+            critical,
+            high,
+            medium,
+            low,
+            info,
+            findings_str
         ));
     }
     csv
@@ -134,7 +156,7 @@ mod tests {
         println!("{}", csv);
 
         // Assert header is present
-        assert!(csv.contains("IP,MAC,Hostname,Vendor,OS,Status,Open Ports,Vulnerabilities"));
+        assert!(csv.contains("IP,MAC,Hostname,Vendor,OS,Status,Open Ports,Findings"));
         // Assert escaped hostname is quoted
         assert!(csv.contains("\"TestHost,Inc.\""));
         // Assert IP and MAC are correct
@@ -142,5 +164,29 @@ mod tests {
         assert!(csv.contains("AA:BB:CC:DD:EE:FF"));
         // Assert port is formatted correctly
         assert!(csv.contains("80/tcp(http)"));
+    }
+
+    #[test]
+    fn test_devices_to_csv_includes_finding_counts() {
+        let mut dev = Device::new("192.168.1.7".to_string());
+        dev.findings.push(crate::types::Finding {
+            id: "finding-1".to_string(),
+            source: crate::types::FindingSource::WebAudit,
+            severity: FindingSeverity::High,
+            confidence: crate::types::FindingConfidence::High,
+            title: "Exposed path".to_string(),
+            description: "A sensitive path was exposed".to_string(),
+            ip: dev.ip.clone(),
+            port: Some(80),
+            service: Some("http".to_string()),
+            evidence: Some("/.env".to_string()),
+            cve: None,
+            timestamp: 0,
+        });
+
+        let csv = devices_to_csv(&[dev]);
+
+        assert!(csv.contains(",1,0,1,0,0,0,"));
+        assert!(csv.contains("Exposed path (High)"));
     }
 }

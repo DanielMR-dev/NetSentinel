@@ -134,6 +134,30 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         content = content.push(progress_card);
     }
 
+    if !app.findings.is_empty() {
+        let counts = &app.finding_counts;
+        let summary = row![
+            severity_count(
+                "Critical",
+                counts.critical,
+                crate::types::FindingSeverity::Critical
+            ),
+            severity_count("High", counts.high, crate::types::FindingSeverity::High),
+            severity_count(
+                "Medium",
+                counts.medium,
+                crate::types::FindingSeverity::Medium
+            ),
+            severity_count("Low", counts.low, crate::types::FindingSeverity::Low),
+            severity_count("Info", counts.info, crate::types::FindingSeverity::Info),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
+
+        content = content.push(widgets::card(Some("Findings Summary"), summary));
+    }
+
     // ── Toolbar Header (Title, Exports) ─────────────────────────────────
     let toolbar = row![
         text(format!(
@@ -186,6 +210,10 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         .on_toggle(Message::FilterHasOpenPortsToggled)
         .size(14);
 
+    let findings_check = checkbox("Has findings", app.filter_has_findings)
+        .on_toggle(Message::FilterHasFindingsToggled)
+        .size(14);
+
     let mut filter_row = row![
         column![text("Search").color(TEXT_MUTED).size(10), search_input]
             .spacing(2)
@@ -196,11 +224,18 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         column![text("Ports").color(TEXT_MUTED).size(10), open_ports_check]
             .spacing(2)
             .width(Length::Shrink),
+        column![text("Findings").color(TEXT_MUTED).size(10), findings_check]
+            .spacing(2)
+            .width(Length::Shrink),
     ]
     .spacing(12)
     .align_y(Alignment::Center);
 
-    if !app.search_query.is_empty() || app.filter_status != "all" || app.filter_has_open_ports {
+    if !app.search_query.is_empty()
+        || app.filter_status != "all"
+        || app.filter_has_open_ports
+        || app.filter_has_findings
+    {
         filter_row = filter_row.push(
             button(text("Clear").size(11))
                 .padding([4, 8])
@@ -282,6 +317,11 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
             Length::FillPortion(1)
         ),
         make_header(
+            "Findings",
+            crate::ui::SortField::Findings,
+            Length::FillPortion(1)
+        ),
+        make_header(
             "Last Seen",
             crate::ui::SortField::LastSeen,
             Length::FillPortion(2)
@@ -316,7 +356,12 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         for device in &app.filtered_devices {
             let hostname = device.hostname.as_deref().unwrap_or("-");
             let vendor = device.vendor.as_deref().unwrap_or("-");
-            let port_count = device.ports.len();
+            let port_count = device
+                .ports
+                .iter()
+                .filter(|port| port.state == crate::types::PortState::Open)
+                .count();
+            let finding_count = device.findings.len();
 
             let is_selected = app
                 .selected_device
@@ -345,6 +390,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
                     .color(TEXT)
                     .size(12)
                     .width(Length::FillPortion(1)),
+                widgets::findings_count_badge(finding_count).width(Length::FillPortion(1)),
                 text(format_timestamp(device.last_seen))
                     .color(TEXT_MUTED)
                     .size(11)
@@ -448,11 +494,43 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
                     "Port {}: {} ({})",
                     banner.port,
                     banner.service.as_deref().unwrap_or("unknown"),
-                    &banner.banner[..banner.banner.len().min(80)]
+                    truncate_chars(&banner.banner, 80)
                 );
                 banners_col = banners_col.push(text(banner_text).color(TEXT_MUTED).size(12));
             }
             detail_col = detail_col.push(scrollable(banners_col).height(Length::Fixed(140.0)));
+        }
+
+        if !device.findings.is_empty() {
+            detail_col = detail_col.push(text("Findings").color(TEXT).size(14));
+            let mut findings_col = column![].spacing(8);
+            for finding in &device.findings {
+                let target = finding
+                    .port
+                    .map(|port| format!("{}:{}", finding.ip, port))
+                    .unwrap_or_else(|| finding.ip.clone());
+                let evidence = finding
+                    .evidence
+                    .as_ref()
+                    .map(|evidence| format!(" - {}", truncate_chars(evidence, 72)))
+                    .unwrap_or_default();
+
+                findings_col = findings_col.push(
+                    column![
+                        row![
+                            widgets::finding_severity_badge(&finding.severity),
+                            text(&finding.title).color(TEXT).size(12),
+                        ]
+                        .spacing(8)
+                        .align_y(Alignment::Center),
+                        text(format!("{}{}", target, evidence))
+                            .color(TEXT_MUTED)
+                            .size(11),
+                    ]
+                    .spacing(4),
+                );
+            }
+            detail_col = detail_col.push(scrollable(findings_col).height(Length::Fixed(180.0)));
         }
 
         let detail_card = container(detail_col)
@@ -531,6 +609,30 @@ fn format_timestamp(ts: i64) -> String {
         Some(dt) => dt.format("%H:%M:%S").to_string(),
         None => "never".to_string(),
     }
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    let mut truncated: String = value.chars().take(max_chars).collect();
+    if value.chars().count() > max_chars {
+        truncated.push_str("...");
+    }
+    truncated
+}
+
+fn severity_count<'a>(
+    label: &'static str,
+    count: usize,
+    severity: crate::types::FindingSeverity,
+) -> iced::Element<'a, Message> {
+    row![
+        widgets::finding_severity_badge(&severity),
+        text(format!("{} {}", count, label))
+            .color(TEXT_MUTED)
+            .size(12),
+    ]
+    .spacing(6)
+    .align_y(Alignment::Center)
+    .into()
 }
 
 /// Helper function to style table rows as clickable buttons
