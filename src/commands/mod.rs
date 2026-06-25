@@ -15,6 +15,7 @@ pub mod scan;
 pub mod scan_store;
 pub mod scheduler;
 pub mod settings;
+pub mod scan_pipeline;
 
 use serde::Serialize;
 

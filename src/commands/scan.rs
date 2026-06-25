@@ -7,22 +7,17 @@
 
 use std::net::IpAddr;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use futures::stream::{self, StreamExt};
-use tokio::sync::{mpsc, oneshot};
-use tracing::warn;
+use tokio::sync::mpsc;
 
 use crate::error::ScanError;
 use crate::events::AppEvent;
 use crate::network::timing::TimingTemplate;
-use crate::network::{cidr, host_discovery, icmp, sanitize};
+use crate::network::{cidr, icmp, sanitize};
 use crate::scan_store::{NewScanSession, ScanSessionStatus, ScanStore, StoredScanConfig};
 use crate::state::SharedScanState;
-use crate::types::{Device, Finding, PortState, ScanResponse, ScanResultsResponse, ScanType};
-
-const MAX_CONCURRENT_BANNER_GRABS: usize = 16;
-const MAX_CONCURRENT_CVE_LOOKUPS: usize = 8;
+use crate::types::{Device, ScanResponse, ScanResultsResponse, ScanType};
 
 /// Start a network scan.
 ///
@@ -75,9 +70,6 @@ pub async fn start_scan(
             | ScanType::Sctp
     );
 
-    // Cache the UDP scan mode once so we do not re-check privileges per host.
-    let mut udp_uses_raw = true;
-
     if requires_raw_socket {
         let priv_status =
             tokio::task::spawn_blocking(crate::network::privileges::check_system_privileges)
@@ -100,7 +92,6 @@ pub async fn start_scan(
             }
             ScanType::Udp => {
                 if !priv_status.udp_scan_available {
-                    udp_uses_raw = false;
                     send_log(
                         "warn",
                         "Insufficient privileges for raw UDP scan (requires root/Administrator/CAP_NET_RAW). Falling back to UDP connect/basic scan for all hosts.",
@@ -155,9 +146,19 @@ pub async fn start_scan(
     let scan_id = uuid::Uuid::new_v4().to_string();
     state.set_current_scan_id(Some(scan_id.clone())).await;
 
-    // Install cancellation before scan-store setup so an early Stop is honored.
-    let (cancel_tx, cancel_rx) = oneshot::channel();
-    state.set_cancel_tx(cancel_tx).await;
+    // Setup Watch channels for lifecycle
+    let (pause_tx, pause_rx) = tokio::sync::watch::channel(false);
+    let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+
+    // Register cancellation oneshot with state and bridge to watch channel
+    let (cancel_state_tx, cancel_state_rx) = tokio::sync::oneshot::channel();
+    state.set_cancel_tx(cancel_state_tx).await;
+    
+    let cancel_tx_clone = cancel_tx.clone();
+    tokio::spawn(async move {
+        let _ = cancel_state_rx.await;
+        let _ = cancel_tx_clone.send(true);
+    });
 
     let config_dir = match crate::commands::settings::get_config_dir() {
         Ok(config_dir) => config_dir,
@@ -226,440 +227,124 @@ pub async fn start_scan(
         None,
     );
 
-    // Spawn the scanning task
-    let state_clone = state.clone();
-    let event_tx_clone = event_tx.clone();
-    let scan_id_clone = scan_id.clone();
-    let scan_store_clone = scan_store.clone();
-    let _cidr_clone = cidr.clone();
-    let scan_type_for_thread = effective_scan_type.clone();
-
+    // Bridge state pause status to watch channel
+    let state_c = state.clone();
     tokio::spawn(async move {
-        let start_time = Instant::now();
-
-        // Parse IPs from CIDR
-        let ips: Vec<IpAddr> = network.iter().map(|ip| IpAddr::from(ip)).collect();
-
-        // Run IPv4 host discovery
-        let mut discovery_result = host_discovery::discover_hosts(
-            ips,
-            event_tx_clone.clone(),
-            cancel_rx,
-            effective_max_concurrent,
-            effective_retry_count as u32,
-            Some(state_clone.scanned_count.clone()),
-        )
-        .await;
-
-        // Extend with NetBIOS if requested (and if we have IPv4 targets)
-        if _use_arp {
-            let ipv4 = network.ip();
-            let bcast =
-                std::net::Ipv4Addr::new(ipv4.octets()[0], ipv4.octets()[1], ipv4.octets()[2], 255);
-            if let Ok(nbns_devs) = crate::network::mdns_netbios::discover_netbios(bcast).await {
-                if let Ok(ref mut devs) = discovery_result {
-                    for d in nbns_devs {
-                        if !devs.iter().any(|existing| existing.ip == d.ip) {
-                            devs.push(d);
-                        }
-                    }
-                }
+        let mut last_paused = false;
+        while state_c.is_running() {
+            let current_paused = state_c.is_paused();
+            if current_paused != last_paused {
+                let _ = pause_tx.send(current_paused);
+                last_paused = current_paused;
             }
-
-            // Extend with mDNS
-            if let Ok(mdns_devs) = crate::network::mdns_netbios::discover_mdns().await {
-                if let Ok(ref mut devs) = discovery_result {
-                    for d in mdns_devs {
-                        if !devs.iter().any(|existing| existing.ip == d.ip) {
-                            devs.push(d);
-                        }
-                    }
-                }
-            }
-
-            // Extend with IPv6
-            if let Ok(ipv6_devs) =
-                crate::network::ipv6_discovery::discover_ipv6_hosts(event_tx_clone.clone()).await
-            {
-                if let Ok(ref mut devs) = discovery_result {
-                    for d in ipv6_devs {
-                        if !devs.iter().any(|existing| existing.ip == d.ip) {
-                            devs.push(d);
-                        }
-                    }
-                }
-            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
+    });
 
-        let duration_ms = start_time.elapsed().as_millis() as u64;
+    // Create PipelineContext
+    let ctx = Arc::new(crate::commands::scan_pipeline::PipelineContext {
+        state: state.clone(),
+        scan_store: scan_store.clone(),
+        scan_id: scan_id.clone(),
+        event_tx: event_tx.clone(),
+        host_semaphore: Arc::new(tokio::sync::Semaphore::new(effective_max_concurrent)),
+        port_semaphore: Arc::new(tokio::sync::Semaphore::new(100)),
+        raw_socket_semaphore: Arc::new(tokio::sync::Semaphore::new(50)),
+        enrichment_semaphore: Arc::new(tokio::sync::Semaphore::new(16)),
+        pause_rx,
+        cancel_rx,
+    });
 
-        match discovery_result {
-            Ok(mut devices) => {
-                for device in &devices {
-                    if let Err(e) = scan_store_clone
-                        .upsert_device(scan_id_clone.clone(), device.clone())
-                        .await
-                    {
-                        send_persistence_warning(
-                            &event_tx_clone,
-                            &format!("Failed to persist discovered device {}: {}", device.ip, e),
-                        );
-                    }
-                }
+    // Connect stages via bounded channels
+    let (target_tx, target_rx) = mpsc::channel(64);
+    let (discovery_tx, discovery_rx) = mpsc::channel(32);
+    let (port_tx, port_rx) = mpsc::channel(16);
+    let (enrich_tx, enrich_rx) = mpsc::channel(16);
+    let (finding_tx, finding_rx) = mpsc::channel(32);
 
-                if let Err(e) = scan_store_clone
-                    .update_progress(scan_id_clone.clone(), devices.len() as u32, total_hosts)
-                    .await
-                {
-                    send_persistence_warning(
-                        &event_tx_clone,
-                        &format!("Failed to persist scan progress: {}", e),
-                    );
-                }
-
-                // Perform Port Scanning if requested
-                if scan_ports && !ports.is_empty() && !devices.is_empty() {
-                    let timing_controller =
-                        crate::network::timing::TimingController::new(effective_timing.clone());
-
-                    for device in devices.iter_mut() {
-                        if !state_clone.is_running() {
-                            break;
-                        }
-
-                        let ip_addr = match device.ip.parse::<std::net::Ipv4Addr>() {
-                            Ok(ip) => ip,
-                            Err(_) => continue, // Ignore IPv6 for raw scans currently
-                        };
-
-                        let (mut scanned_ports, detected_ttl) = match scan_type_for_thread {
-                            ScanType::Syn | ScanType::Fin | ScanType::Xmas | ScanType::Null => {
-                                if let Ok(scanner) =
-                                    crate::network::tcp_raw_scan::RawTcpScanner::new_for_target(
-                                        ip_addr,
-                                        scan_type_for_thread.clone(),
-                                    )
-                                    .await
-                                {
-                                    scanner
-                                        .scan_ports(ip_addr, &ports, &timing_controller)
-                                        .await
-                                } else {
-                                    (vec![], None)
-                                }
-                            }
-                            ScanType::Udp => {
-                                if udp_uses_raw {
-                                    if let Ok(scanner) =
-                                        crate::network::udp_raw_scan::UdpRawScanner::new_for_target(
-                                            ip_addr,
-                                        )
-                                        .await
-                                    {
-                                        scanner
-                                            .scan_ports(ip_addr, &ports, &timing_controller)
-                                            .await
-                                    } else {
-                                        let udp_ports = crate::network::udp_scan::scan_udp_ports(
-                                            std::net::IpAddr::V4(ip_addr),
-                                            &ports,
-                                            timing_controller.connection_timeout().as_millis()
-                                                as u64,
-                                        )
-                                        .await;
-                                        (udp_ports, None)
-                                    }
-                                } else {
-                                    let udp_ports = crate::network::udp_scan::scan_udp_ports(
-                                        std::net::IpAddr::V4(ip_addr),
-                                        &ports,
-                                        timing_controller.connection_timeout().as_millis() as u64,
-                                    )
-                                    .await;
-                                    (udp_ports, None)
-                                }
-                            }
-                            ScanType::Sctp => {
-                                if let Ok(scanner) =
-                                    crate::network::sctp_scan::SctpScanner::new_for_target(ip_addr)
-                                        .await
-                                {
-                                    scanner
-                                        .scan_ports(ip_addr, &ports, &timing_controller)
-                                        .await
-                                } else {
-                                    (vec![], None)
-                                }
-                            }
-                            ScanType::Connect => {
-                                let ip: std::net::IpAddr = ip_addr.into();
-                                let timeout_ms =
-                                    timing_controller.connection_timeout().as_millis() as u64;
-                                let connect_ports = crate::network::host_discovery::scan_ports(
-                                    ip, &ports, timeout_ms,
-                                )
-                                .await;
-                                (connect_ports, None)
-                            }
-                        };
-
-                        // Perform service detection on Open ports
-                        let detector = crate::network::service_detection::ServiceDetector::new(
-                            std::time::Duration::from_millis(
-                                timing_controller.connection_timeout().as_millis() as u64 * 2,
-                            ),
-                        );
-
-                        for port in scanned_ports.iter_mut() {
-                            if port.state == crate::types::PortState::Open && port.protocol == "tcp"
-                            {
-                                if let Ok(info) = detector.detect_tcp(&device.ip, port.number).await
-                                {
-                                    if let Some(srv) = info.service {
-                                        port.service = Some(srv);
-                                    }
-                                }
-                            }
-                        }
-
-                        device.ports = scanned_ports.clone();
-                        if let Some(ttl) = detected_ttl {
-                            device.os = Some(format!("TTL: {}", ttl));
-                        }
-
-                        if !state_clone.is_running() {
-                            break;
-                        }
-
-                        let open_banner_ports: Vec<u16> = scanned_ports
-                            .iter()
-                            .filter(|port| {
-                                port.state == PortState::Open
-                                    && port.protocol == "tcp"
-                                    && crate::network::banner::BANNER_PORTS.contains(&port.number)
-                            })
-                            .map(|port| port.number)
-                            .collect();
-
-                        if !open_banner_ports.is_empty() {
-                            let grabber = Arc::new(crate::network::banner::BannerGrabber::new(
-                                Duration::from_millis(
-                                    timing_controller.connection_timeout().as_millis() as u64,
-                                ),
-                            ));
-                            let device_ip = device.ip.clone();
-                            let banners: Vec<_> = stream::iter(open_banner_ports)
-                                .map(|port| {
-                                    let grabber = Arc::clone(&grabber);
-                                    let ip = device_ip.clone();
-                                    async move { grabber.grab_banner(&ip, port).await.ok() }
-                                })
-                                .buffer_unordered(MAX_CONCURRENT_BANNER_GRABS)
-                                .filter_map(|result| async move { result })
-                                .collect()
-                                .await;
-
-                            for banner in &banners {
-                                let _ = event_tx_clone.send(AppEvent::BannerFound(banner.clone()));
-                            }
-
-                            device.banner_results = banners.clone();
-
-                            if state_clone.is_running() {
-                                let cve_results: Vec<Vec<_>> = stream::iter(banners)
-                                    .map(|banner| async move {
-                                        match crate::network::cve::lookup_cves_async(banner).await {
-                                            Ok(matches) => matches,
-                                            Err(e) => {
-                                                tracing::warn!("CVE lookup failed: {}", e);
-                                                Vec::new()
-                                            }
-                                        }
-                                    })
-                                    .buffer_unordered(MAX_CONCURRENT_CVE_LOOKUPS)
-                                    .collect()
-                                    .await;
-
-                                for cve in cve_results.into_iter().flatten() {
-                                    let finding = Finding::from_cve(&cve);
-                                    let _ = event_tx_clone.send(AppEvent::CveAlert(cve));
-                                    if push_unique_finding(&mut device.findings, finding.clone()) {
-                                        let _ =
-                                            event_tx_clone.send(AppEvent::FindingFound(finding));
-                                    }
-                                }
-                            }
-                        }
-
-                        if !state_clone.is_running() {
-                            break;
-                        }
-
-                        // Run Web Audits
-                        if let Some(profile) = web_audit_profile {
-                            let mut audits = Vec::new();
-                            for port in &scanned_ports {
-                                if !state_clone.is_running() {
-                                    break;
-                                }
-                                if port.state == crate::types::PortState::Open
-                                    && (port.number == 80
-                                        || port.number == 443
-                                        || port.number == 8080
-                                        || port.number == 8443)
-                                {
-                                    let is_https = port.number == 443 || port.number == 8443;
-                                    if let Ok(res) = crate::network::web_audit::audit_web_service(
-                                        &device.ip,
-                                        port.number,
-                                        is_https,
-                                        profile,
-                                    )
-                                    .await
-                                    {
-                                        audits.push(res);
-                                    }
-                                }
-                            }
-                            device.web_audits = audits;
-                            let web_findings: Vec<Finding> = device
-                                .web_audits
-                                .iter()
-                                .flat_map(Finding::from_web_audit)
-                                .collect();
-                            for finding in web_findings {
-                                if push_unique_finding(&mut device.findings, finding.clone()) {
-                                    let _ = event_tx_clone.send(AppEvent::FindingFound(finding));
-                                }
-                            }
-                        }
-
-                        // Run Active Checks
-                        if run_active_checks.unwrap_or(false) {
-                            if !state_clone.is_running() {
-                                break;
-                            }
-                            let open_ports: Vec<u16> = scanned_ports
-                                .iter()
-                                .filter(|p| p.state == crate::types::PortState::Open)
-                                .map(|p| p.number)
-                                .collect();
-                            device.active_checks =
-                                crate::network::active_checks::run_active_checks(
-                                    &device.ip,
-                                    &open_ports,
-                                )
-                                .await;
-                            let active_findings: Vec<Finding> = device
-                                .active_checks
-                                .iter()
-                                .filter_map(|check| Finding::from_active_check(&device.ip, check))
-                                .collect();
-                            for finding in active_findings {
-                                if push_unique_finding(&mut device.findings, finding.clone()) {
-                                    let _ = event_tx_clone.send(AppEvent::FindingFound(finding));
-                                }
-                            }
-                        }
-                    }
-                }
-
-                let device_count = devices.len() as u32;
-
-                // Store devices in shared state
-                for device in &devices {
-                    state_clone.add_device(device.clone()).await;
-                    if let Err(e) = scan_store_clone
-                        .upsert_device(scan_id_clone.clone(), device.clone())
-                        .await
-                    {
-                        send_persistence_warning(
-                            &event_tx_clone,
-                            &format!("Failed to persist final device {}: {}", device.ip, e),
-                        );
-                    } else {
-                        state_clone.set_persisted_device_count(device_count);
-                    }
-                }
-
-                let final_scanned_count = if state_clone.is_cancel_requested() {
-                    state_clone.get_scanned_count().min(total_hosts)
-                } else {
-                    total_hosts
-                };
-                if let Err(e) = scan_store_clone
-                    .update_progress(scan_id_clone.clone(), final_scanned_count, total_hosts)
-                    .await
-                {
-                    send_persistence_warning(
-                        &event_tx_clone,
-                        &format!("Failed to persist final scan progress: {}", e),
-                    );
-                }
-
-                let final_status = if state_clone.is_cancel_requested() || !state_clone.is_running()
-                {
-                    ScanSessionStatus::Cancelled
-                } else {
-                    ScanSessionStatus::Completed
-                };
-                if let Err(e) = scan_store_clone
-                    .complete_session(scan_id_clone.clone(), final_status, Some(duration_ms), None)
-                    .await
-                {
-                    send_persistence_warning(
-                        &event_tx_clone,
-                        &format!("Failed to complete persisted scan session: {}", e),
-                    );
-                }
-
-                let _ = event_tx_clone.send(AppEvent::ScanComplete {
-                    scan_id: scan_id_clone,
-                    device_count,
-                    duration_ms,
-                    status: final_status.as_str().to_string(),
-                    devices,
-                });
-            }
-            Err(e) => {
-                warn!("Scan failed: {}", e);
-                let persisted_status = if matches!(e, ScanError::Cancelled)
-                    || state_clone.is_cancel_requested()
-                    || !state_clone.is_running()
-                {
-                    ScanSessionStatus::Cancelled
-                } else {
-                    ScanSessionStatus::Error
-                };
-                if let Err(persist_error) = scan_store_clone
-                    .complete_session(
-                        scan_id_clone.clone(),
-                        persisted_status,
-                        Some(duration_ms),
-                        Some(e.to_string()),
-                    )
-                    .await
-                {
-                    send_persistence_warning(
-                        &event_tx_clone,
-                        &format!(
-                            "Failed to complete persisted scan session: {}",
-                            persist_error
-                        ),
-                    );
-                }
-                let _ = event_tx_clone.send(AppEvent::ScanComplete {
-                    scan_id: scan_id_clone,
-                    device_count: 0,
-                    duration_ms,
-                    status: format!("error: {}", e),
-                    devices: Vec::new(),
-                });
-            }
+    // Spawn Stage 1: Target Stream
+    let ctx_c1 = ctx.clone();
+    let cidr_c = cidr.clone();
+    tokio::spawn(async move {
+        if let Err(e) = crate::commands::scan_pipeline::stage_target_stream(ctx_c1, cidr_c, target_tx).await {
+            tracing::error!("Stage 1 (Target Stream) failed: {}", e);
         }
+    });
 
-        state_clone.set_running(false);
-        state_clone.set_current_scan_id(None).await;
+    // Spawn Stage 2: Host Discovery
+    let ctx_c2 = ctx.clone();
+    let cidr_c2 = cidr.clone();
+    let methods_c = methods.clone();
+    let retry_count_c = effective_retry_count;
+    tokio::spawn(async move {
+        if let Err(e) = crate::commands::scan_pipeline::stage_host_discovery(
+            ctx_c2,
+            cidr_c2,
+            methods_c,
+            retry_count_c,
+            target_rx,
+            discovery_tx,
+        ).await {
+            tracing::error!("Stage 2 (Host Discovery) failed: {}", e);
+        }
+    });
+
+    // Spawn Stage 3: Port Scan
+    let ctx_c3 = ctx.clone();
+    let ports_c = if scan_ports { ports.clone() } else { Vec::new() };
+    let scan_type_c = effective_scan_type.clone();
+    let timing_template_c = effective_timing.clone();
+    tokio::spawn(async move {
+        if let Err(e) = crate::commands::scan_pipeline::stage_port_scan(
+            ctx_c3,
+            ports_c,
+            scan_type_c,
+            timing_template_c,
+            discovery_rx,
+            port_tx,
+        ).await {
+            tracing::error!("Stage 3 (Port Scan) failed: {}", e);
+        }
+    });
+
+    // Spawn Stage 4: Enrichment
+    let ctx_c4 = ctx.clone();
+    let web_profile_c = web_audit_profile.clone();
+    let run_active_c = run_active_checks.unwrap_or(false);
+    tokio::spawn(async move {
+        if let Err(e) = crate::commands::scan_pipeline::stage_enrichment(
+            ctx_c4,
+            web_profile_c,
+            run_active_c,
+            port_rx,
+            enrich_tx,
+        ).await {
+            tracing::error!("Stage 4 (Enrichment) failed: {}", e);
+        }
+    });
+
+    // Spawn Stage 5: Finding Generation
+    let ctx_c5 = ctx.clone();
+    tokio::spawn(async move {
+        if let Err(e) = crate::commands::scan_pipeline::stage_finding_gen(
+            ctx_c5,
+            enrich_rx,
+            finding_tx,
+        ).await {
+            tracing::error!("Stage 5 (Finding Gen) failed: {}", e);
+        }
+    });
+
+    // Spawn Stage 6: Persistence & UI Events
+    let ctx_c6 = ctx.clone();
+    tokio::spawn(async move {
+        if let Err(e) = crate::commands::scan_pipeline::stage_persistence_ui(
+            ctx_c6,
+            total_hosts,
+            finding_rx,
+        ).await {
+            tracing::error!("Stage 6 (Persistence & UI) failed: {}", e);
+        }
     });
 
     Ok(ScanResponse {
@@ -811,15 +496,6 @@ async fn try_icmp_discovery(
     Ok(devices)
 }
 
-fn push_unique_finding(findings: &mut Vec<Finding>, finding: Finding) -> bool {
-    if findings.iter().any(|existing| existing.id == finding.id) {
-        return false;
-    }
-
-    findings.push(finding);
-    true
-}
-
 fn scan_type_label(scan_type: &ScanType) -> &'static str {
     match scan_type {
         ScanType::Connect => "connect",
@@ -830,13 +506,4 @@ fn scan_type_label(scan_type: &ScanType) -> &'static str {
         ScanType::Udp => "udp",
         ScanType::Sctp => "sctp",
     }
-}
-
-fn send_persistence_warning(event_tx: &mpsc::UnboundedSender<AppEvent>, message: &str) {
-    let _ = event_tx.send(AppEvent::ScanLog {
-        level: "warn".to_string(),
-        message: message.to_string(),
-        target: None,
-        timestamp: chrono::Utc::now().timestamp(),
-    });
 }

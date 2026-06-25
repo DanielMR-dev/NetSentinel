@@ -299,7 +299,7 @@ fn reverse_dns_lookup_blocking(ip: &str) -> Option<String> {
 /// Check if a host is alive by probing common ports, with retry support.
 ///
 /// Retries the probe up to `retry_count` times if the initial attempt fails.
-async fn check_host_alive_with_retry(ip: IpAddr, retry_count: u32) -> bool {
+pub async fn check_host_alive_with_retry(ip: IpAddr, retry_count: u32) -> bool {
     for attempt in 0..=retry_count {
         if check_host_alive(ip).await {
             return true;
