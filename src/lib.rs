@@ -48,8 +48,9 @@ pub use history::ScanHistoryEntry;
 pub use network::cve::update_cve_database;
 pub use network::privileges::PrivilegeStatus;
 pub use scan_store::{
-    NewScanSession, Page, ScanSessionStatus, ScanSessionSummary, ScanStore, StoredDeviceSummary,
-    StoredScanConfig,
+    FindingSummary, NewScanSession, Page, ScanSessionStatus, ScanSessionSummary, ScanStore,
+    StoredDeviceSummary, StoredScanConfig,
 };
 pub use settings::SettingsProfile;
 pub use state::SharedScanState;
+pub use types::FindingCategory;

@@ -1,12 +1,15 @@
 use std::sync::Arc;
+use std::time::Duration;
+
+use futures::stream::{self, StreamExt};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
-use futures::stream::{self, StreamExt};
 
+use super::context::{wait_if_paused, PipelineContext};
 use crate::error::ScanError;
 use crate::events::AppEvent;
-use crate::types::{Device, Finding};
-use super::context::{PipelineContext, wait_if_paused};
+use crate::reporting::compliance::ComplianceEngine;
+use crate::types::{Device, Finding, FindingCategory};
 
 const MAX_CONCURRENT_CVE_LOOKUPS: usize = 8;
 
@@ -106,6 +109,61 @@ pub async fn stage_finding_gen(
                         .filter_map(|check| Finding::from_active_check(&device.ip, check))
                         .collect();
                     for finding in active_findings {
+                        if push_unique_finding(&mut device.findings, finding.clone()) {
+                            let _ = ctx_c.event_tx.send(AppEvent::FindingFound(finding.clone()));
+                            new_findings.push(finding);
+                        }
+                    }
+
+                    // 4. EPSS enrichment for CVE findings
+                    for finding in device.findings.iter_mut() {
+                        if finding.category != FindingCategory::Cve {
+                            continue;
+                        }
+                        let cve = match finding.cve.as_ref() {
+                            Some(cve) => cve,
+                            None => continue,
+                        };
+                        let cve_id = cve.cve_id.clone();
+
+                        // Best-effort: always normalize CVSS from stored CVE details.
+                        finding.cvss_score = Some(cve.cvss_score);
+
+                        let _permit = ctx_c.enrichment_semaphore.acquire().await.ok();
+                        let epss_result = tokio::time::timeout(
+                            Duration::from_secs(5),
+                            crate::reporting::scoring::get_epss_score(&cve_id),
+                        )
+                        .await;
+
+                        match epss_result {
+                            Ok(Some(epss)) => {
+                                finding.epss_probability = Some(epss.probability);
+                            }
+                            Ok(None) => {}
+                            Err(_) => {
+                                tracing::warn!("EPSS lookup timed out for {}", cve_id);
+                            }
+                        }
+                    }
+
+                    // 5. TLS certificate findings
+                    let tls_findings: Vec<Finding> = device
+                        .banner_results
+                        .iter()
+                        .filter_map(|b| b.tls_info.as_ref().map(|tls| (b.port, tls)))
+                        .flat_map(|(port, tls)| Finding::from_tls(&device.ip, port, tls))
+                        .collect();
+                    for finding in tls_findings {
+                        if push_unique_finding(&mut device.findings, finding.clone()) {
+                            let _ = ctx_c.event_tx.send(AppEvent::FindingFound(finding.clone()));
+                            new_findings.push(finding);
+                        }
+                    }
+
+                    // 6. Compliance findings
+                    let compliance_findings = ComplianceEngine::audit_device_findings(&device);
+                    for finding in compliance_findings {
                         if push_unique_finding(&mut device.findings, finding.clone()) {
                             let _ = ctx_c.event_tx.send(AppEvent::FindingFound(finding.clone()));
                             new_findings.push(finding);

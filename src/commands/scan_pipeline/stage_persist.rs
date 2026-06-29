@@ -1,11 +1,11 @@
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+use super::context::{wait_if_paused, PipelineContext};
 use crate::error::ScanError;
 use crate::events::AppEvent;
-use crate::types::{Device, Finding};
 use crate::scan_store::ScanSessionStatus;
-use super::context::{PipelineContext, wait_if_paused};
+use crate::types::{Device, Finding};
 
 /// Stage 6: Persistence & UI Events
 /// Saves finalized device results and security findings to the database (ScanStore),
@@ -86,8 +86,15 @@ pub async fn stage_persistence_ui(
     } else {
         total_hosts
     };
-    if let Err(e) = ctx.scan_store.update_progress(ctx.scan_id.clone(), final_scanned, total_hosts).await {
-        send_persistence_warning(&ctx.event_tx, &format!("Failed to persist final scan progress: {}", e));
+    if let Err(e) = ctx
+        .scan_store
+        .update_progress(ctx.scan_id.clone(), final_scanned, total_hosts)
+        .await
+    {
+        send_persistence_warning(
+            &ctx.event_tx,
+            &format!("Failed to persist final scan progress: {}", e),
+        );
     }
 
     let final_status = if ctx.state.is_cancel_requested() || !ctx.state.is_running() {
@@ -100,8 +107,20 @@ pub async fn stage_persistence_ui(
     let actual_device_count = devices.len() as u32;
     ctx.state.set_persisted_device_count(actual_device_count);
 
-    if let Err(e) = ctx.scan_store.complete_session(ctx.scan_id.clone(), final_status.clone(), Some(duration_ms), None).await {
-        send_persistence_warning(&ctx.event_tx, &format!("Failed to complete scan session in store: {}", e));
+    if let Err(e) = ctx
+        .scan_store
+        .complete_session(
+            ctx.scan_id.clone(),
+            final_status.clone(),
+            Some(duration_ms),
+            None,
+        )
+        .await
+    {
+        send_persistence_warning(
+            &ctx.event_tx,
+            &format!("Failed to complete scan session in store: {}", e),
+        );
     }
 
     // Emit ScanComplete event

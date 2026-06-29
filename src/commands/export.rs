@@ -182,6 +182,10 @@ mod tests {
             evidence: Some("/.env".to_string()),
             cve: None,
             timestamp: 0,
+            category: crate::types::FindingCategory::Web,
+            cvss_score: None,
+            epss_probability: None,
+            remediation: None,
         });
 
         let csv = devices_to_csv(&[dev]);

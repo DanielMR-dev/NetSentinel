@@ -6,4 +6,5 @@
 pub mod advanced;
 pub mod compliance;
 pub mod export;
+pub mod risk;
 pub mod scoring;

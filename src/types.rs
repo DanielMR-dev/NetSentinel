@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::network::banner::BannerResult;
 use crate::network::cve::{CveMatch, CveSeverity};
+use crate::network::tls::TlsInfo;
+use crate::reporting::compliance::ComplianceIssue;
 
 /// Source subsystem that produced a finding.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -10,6 +12,20 @@ pub enum FindingSource {
     Cve,
     ActiveCheck,
     WebAudit,
+}
+
+/// Logical category for a finding, used for grouping and reporting.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FindingCategory {
+    #[default]
+    Cve,
+    Web,
+    ActiveCheck,
+    Tls,
+    Compliance,
+    Traffic,
+    Exposure,
 }
 
 /// Normalized finding severity used across CVE, active check, and web audit results.
@@ -59,6 +75,14 @@ pub struct Finding {
     pub evidence: Option<String>,
     pub cve: Option<CveFindingDetails>,
     pub timestamp: i64,
+    #[serde(default)]
+    pub category: FindingCategory,
+    #[serde(default)]
+    pub cvss_score: Option<f64>,
+    #[serde(default)]
+    pub epss_probability: Option<f64>,
+    #[serde(default)]
+    pub remediation: Option<String>,
 }
 
 impl Finding {
@@ -86,6 +110,10 @@ impl Finding {
                 cvss_score: cve.cvss_score,
             }),
             timestamp: chrono::Utc::now().timestamp(),
+            category: FindingCategory::Cve,
+            cvss_score: Some(cve.cvss_score),
+            epss_probability: None,
+            remediation: Some("Update affected software to a patched version.".to_string()),
         }
     }
 
@@ -113,6 +141,10 @@ impl Finding {
             evidence: check.details.clone(),
             cve: None,
             timestamp: chrono::Utc::now().timestamp(),
+            category: FindingCategory::ActiveCheck,
+            cvss_score: None,
+            epss_probability: None,
+            remediation: Some("Remediate per active check guidance.".to_string()),
         })
     }
 
@@ -140,6 +172,12 @@ impl Finding {
                 evidence: Some(audit.exposed_directories.join(", ")),
                 cve: None,
                 timestamp: chrono::Utc::now().timestamp(),
+                category: FindingCategory::Web,
+                cvss_score: None,
+                epss_probability: None,
+                remediation: Some(
+                    "Restrict exposed paths / remove identifying headers.".to_string(),
+                ),
             });
         }
 
@@ -163,10 +201,162 @@ impl Finding {
                 evidence: Some(powered_by.clone()),
                 cve: None,
                 timestamp: chrono::Utc::now().timestamp(),
+                category: FindingCategory::Web,
+                cvss_score: None,
+                epss_probability: None,
+                remediation: Some(
+                    "Restrict exposed paths / remove identifying headers.".to_string(),
+                ),
             });
         }
 
         findings
+    }
+
+    pub fn from_tls(ip: &str, port: u16, tls: &TlsInfo) -> Vec<Self> {
+        let mut findings = Vec::new();
+        let not_after_text = chrono::DateTime::from_timestamp(tls.not_after, 0)
+            .map(|dt| dt.to_rfc3339())
+            .unwrap_or_else(|| tls.not_after.to_string());
+
+        if tls.expired {
+            let title = "Expired TLS certificate".to_string();
+            findings.push(Self {
+                id: stable_finding_id(&["tls", ip, &port.to_string(), &title.to_lowercase()]),
+                source: FindingSource::WebAudit,
+                severity: FindingSeverity::Critical,
+                confidence: FindingConfidence::Confirmed,
+                title,
+                description: "The TLS certificate has expired.".to_string(),
+                ip: ip.to_string(),
+                port: Some(port),
+                service: Some("tls".to_string()),
+                evidence: Some(format!(
+                    "Issuer: {}; Subject: {}; Not After: {}; Version: {}",
+                    tls.issuer, tls.subject, not_after_text, tls.version
+                )),
+                cve: None,
+                timestamp: chrono::Utc::now().timestamp(),
+                category: FindingCategory::Tls,
+                cvss_score: None,
+                epss_probability: None,
+                remediation: Some(
+                    "Renew or remove the expired certificate immediately.".to_string(),
+                ),
+            });
+        }
+
+        if tls.self_signed && !tls.expired {
+            let title = "Self-signed TLS certificate".to_string();
+            findings.push(Self {
+                id: stable_finding_id(&["tls", ip, &port.to_string(), &title.to_lowercase()]),
+                source: FindingSource::WebAudit,
+                severity: FindingSeverity::High,
+                confidence: FindingConfidence::Confirmed,
+                title,
+                description: "The TLS certificate is self-signed.".to_string(),
+                ip: ip.to_string(),
+                port: Some(port),
+                service: Some("tls".to_string()),
+                evidence: Some(format!(
+                    "Issuer: {}; Subject: {}; Not After: {}; Version: {}",
+                    tls.issuer, tls.subject, not_after_text, tls.version
+                )),
+                cve: None,
+                timestamp: chrono::Utc::now().timestamp(),
+                category: FindingCategory::Tls,
+                cvss_score: None,
+                epss_probability: None,
+                remediation: Some(
+                    "Replace self-signed certificate with one issued by a trusted CA.".to_string(),
+                ),
+            });
+        }
+
+        if tls.version != "Unknown"
+            && (tls.version.contains("TLSv1.0") || tls.version.contains("TLSv1.1"))
+        {
+            let title = "Weak TLS protocol version".to_string();
+            findings.push(Self {
+                id: stable_finding_id(&["tls", ip, &port.to_string(), &title.to_lowercase()]),
+                source: FindingSource::WebAudit,
+                severity: FindingSeverity::Medium,
+                confidence: FindingConfidence::Confirmed,
+                title,
+                description: "The service negotiates a deprecated TLS version.".to_string(),
+                ip: ip.to_string(),
+                port: Some(port),
+                service: Some("tls".to_string()),
+                evidence: Some(format!(
+                    "Issuer: {}; Subject: {}; Not After: {}; Version: {}",
+                    tls.issuer, tls.subject, not_after_text, tls.version
+                )),
+                cve: None,
+                timestamp: chrono::Utc::now().timestamp(),
+                category: FindingCategory::Tls,
+                cvss_score: None,
+                epss_probability: None,
+                remediation: Some("Disable TLSv1.0/1.1 and enforce TLSv1.2+.".to_string()),
+            });
+        }
+
+        if !tls.expired && tls.days_until_expiry > 0 && tls.days_until_expiry < 30 {
+            let title = "TLS certificate expiring soon".to_string();
+            findings.push(Self {
+                id: stable_finding_id(&["tls", ip, &port.to_string(), &title.to_lowercase()]),
+                source: FindingSource::WebAudit,
+                severity: FindingSeverity::Low,
+                confidence: FindingConfidence::Confirmed,
+                title,
+                description: format!(
+                    "The TLS certificate expires in {} days.",
+                    tls.days_until_expiry
+                ),
+                ip: ip.to_string(),
+                port: Some(port),
+                service: Some("tls".to_string()),
+                evidence: Some(format!(
+                    "Issuer: {}; Subject: {}; Not After: {}; Version: {}",
+                    tls.issuer, tls.subject, not_after_text, tls.version
+                )),
+                cve: None,
+                timestamp: chrono::Utc::now().timestamp(),
+                category: FindingCategory::Tls,
+                cvss_score: None,
+                epss_probability: None,
+                remediation: Some("Renew the certificate before it expires.".to_string()),
+            });
+        }
+
+        findings
+    }
+
+    pub fn from_compliance(ip: &str, issue: &ComplianceIssue) -> Self {
+        let severity =
+            crate::reporting::compliance::compliance_severity_to_finding(&issue.severity);
+        Self {
+            id: stable_finding_id(&[
+                "compliance",
+                ip,
+                &issue.framework.to_lowercase(),
+                &issue.rule.to_lowercase(),
+            ]),
+            source: FindingSource::ActiveCheck,
+            severity,
+            confidence: FindingConfidence::High,
+            title: format!("{}: {}", issue.framework, issue.rule),
+            description: issue.description.clone(),
+            ip: ip.to_string(),
+            port: issue.port,
+            service: None,
+            evidence: None,
+            cve: None,
+            timestamp: chrono::Utc::now().timestamp(),
+            category: FindingCategory::Compliance,
+            cvss_score: None,
+            epss_probability: None,
+            remediation: Some(format!("{} — review and remediate.", issue.rule)),
+        }
     }
 }
 
@@ -181,7 +371,7 @@ impl From<&CveSeverity> for FindingSeverity {
     }
 }
 
-fn stable_finding_id(parts: &[&str]) -> String {
+pub(crate) fn stable_finding_id(parts: &[&str]) -> String {
     let joined = parts
         .iter()
         .map(|part| {

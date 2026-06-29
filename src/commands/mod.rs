@@ -12,10 +12,10 @@ pub mod network;
 pub mod platform;
 pub mod privilege;
 pub mod scan;
+pub mod scan_pipeline;
 pub mod scan_store;
 pub mod scheduler;
 pub mod settings;
-pub mod scan_pipeline;
 
 use serde::Serialize;
 
@@ -67,9 +67,12 @@ pub use scan::{get_scan_results, pause_scan, resume_scan, start_scan, stop_scan}
 // Re-export scan store commands
 pub use scan_store::{
     begin_scan_session, complete_scan_session, delete_scan_session, get_stored_scan_device,
-    initialize_scan_store, list_scan_devices, list_scan_sessions, load_scan_devices,
-    update_scan_progress, upsert_scan_device, upsert_scan_finding,
+    initialize_scan_store, list_scan_devices, list_scan_findings_page, list_scan_sessions,
+    load_scan_devices, update_scan_progress, upsert_scan_device, upsert_scan_finding,
 };
+
+// Re-export scan store summary types
+pub use crate::scan_store::FindingSummary;
 
 // Re-export export commands
 pub use export::export_audit_report;

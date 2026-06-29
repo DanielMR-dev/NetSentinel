@@ -175,6 +175,14 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
             .padding([4, 8])
             .style(theme::secondary_button)
             .on_press(Message::ExportJson),
+        button(text("Export HTML").size(12))
+            .padding([4, 8])
+            .style(theme::secondary_button)
+            .on_press(Message::ExportHtml),
+        button(text("Export PDF").size(12))
+            .padding([4, 8])
+            .style(theme::secondary_button)
+            .on_press(Message::ExportPdf),
     ]
     .spacing(8)
     .align_y(Alignment::Center)

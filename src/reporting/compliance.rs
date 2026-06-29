@@ -3,15 +3,17 @@
 //! Provides basic heuristic checks against discovered devices to
 //! identify potential compliance violations.
 
-use crate::types::Device;
-use serde::Serialize;
+use crate::types::{Device, Finding, FindingSeverity};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComplianceIssue {
     pub framework: String,
     pub rule: String,
     pub description: String,
     pub severity: String,
+    #[serde(default)]
+    pub port: Option<u16>,
 }
 
 pub struct ComplianceEngine;
@@ -33,6 +35,7 @@ impl ComplianceEngine {
                     rule: "Requirement 4.1 - Secure Protocols".to_string(),
                     description: format!("Insecure cleartext protocol found on port {}. Telnet/FTP are strictly prohibited in cardholder data environments.", port.number),
                     severity: "High".to_string(),
+                    port: Some(port.number),
                 });
             }
 
@@ -43,6 +46,7 @@ impl ComplianceEngine {
                     rule: "Technical Safeguards - Transmission Security (164.312(e)(1))".to_string(),
                     description: "Unencrypted HTTP discovered on port 80. If ePHI is transmitted, it must be encrypted (e.g., via HTTPS).".to_string(),
                     severity: "Medium".to_string(),
+                    port: Some(port.number),
                 });
             }
 
@@ -58,6 +62,7 @@ impl ComplianceEngine {
                             description: "SSH protocol version 1 is outdated and vulnerable."
                                 .to_string(),
                             severity: "High".to_string(),
+                            port: Some(port.number),
                         });
                     }
                 }
@@ -72,10 +77,28 @@ impl ComplianceEngine {
                     rule: "Ensure default passwords are changed".to_string(),
                     description: format!("Default credentials found on {}.", device.ip),
                     severity: "Critical".to_string(),
+                    port: None,
                 });
             }
         }
 
         issues
+    }
+
+    pub fn audit_device_findings(device: &Device) -> Vec<Finding> {
+        Self::audit_device(device)
+            .into_iter()
+            .map(|issue| Finding::from_compliance(&device.ip, &issue))
+            .collect()
+    }
+}
+
+pub(crate) fn compliance_severity_to_finding(s: &str) -> FindingSeverity {
+    match s.to_lowercase().as_str() {
+        "critical" => FindingSeverity::Critical,
+        "high" => FindingSeverity::High,
+        "medium" => FindingSeverity::Medium,
+        "low" => FindingSeverity::Low,
+        _ => FindingSeverity::Info,
     }
 }

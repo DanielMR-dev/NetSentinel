@@ -3,15 +3,15 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
+use super::context::{wait_if_paused, PipelineContext};
 use crate::error::ScanError;
 use crate::events::AppEvent;
-use crate::types::{Device, PortState};
-use crate::network::web_audit::{WebAuditProfile, audit_web_service};
+use crate::network::active_checks::run_active_checks;
 use crate::network::banner::{BannerGrabber, BANNER_PORTS};
 use crate::network::service_detection::ServiceDetector;
 use crate::network::tls::{analyze_tls, is_tls_port};
-use crate::network::active_checks::run_active_checks;
-use super::context::{PipelineContext, wait_if_paused};
+use crate::network::web_audit::{audit_web_service, WebAuditProfile};
+use crate::types::{Device, PortState};
 
 /// Stage 4: Enrichment
 /// Runs service detection on open ports, grabs banners, performs TLS cert audits,
@@ -139,7 +139,7 @@ pub async fn stage_enrichment(
                                 let permit = ctx_c.enrichment_semaphore.clone().acquire_owned().await;
                                 let ip = device.ip.clone();
                                 let port_num = port.number;
-                                
+
                                 let audit_res = tokio::spawn(async move {
                                     let _permit = permit;
                                     audit_web_service(&ip, port_num, is_https, profile).await.ok()

@@ -1,9 +1,9 @@
+use super::context::{wait_if_paused, PipelineContext};
+use crate::error::ScanError;
+use crate::network::cidr;
 use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use crate::error::ScanError;
-use crate::network::cidr;
-use super::context::{PipelineContext, wait_if_paused};
 
 /// Stage 1: Target Stream
 /// Parses the CIDR block and streams individual IP addresses to the next stage.

@@ -10,7 +10,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::error::ScanError;
-use crate::types::{Device, Finding, FindingConfidence, FindingSeverity, FindingSource, PortState};
+use crate::types::{
+    Device, Finding, FindingCategory, FindingConfidence, FindingSeverity, FindingSource, PortState,
+};
 
 const SCHEMA_VERSION: i64 = 1;
 const MAX_PAGE_LIMIT: u32 = 500;
@@ -113,6 +115,25 @@ pub struct Page<T> {
     pub total: u32,
     pub limit: u32,
     pub offset: u32,
+}
+
+/// Summarized view of a persisted finding for paginated UI lists.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FindingSummary {
+    pub scan_id: String,
+    pub finding_id: String,
+    pub device_ip: String,
+    pub category: FindingCategory,
+    pub source: FindingSource,
+    pub severity: FindingSeverity,
+    pub title: String,
+    pub port: Option<u16>,
+    pub service: Option<String>,
+    pub cvss_score: Option<f64>,
+    pub epss_probability: Option<f64>,
+    pub risk_score: f64,
+    pub timestamp: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -250,6 +271,21 @@ impl ScanStore {
             .map_err(|e| {
                 ScanError::ScanStoreError(format!("Scan session delete task failed: {}", e))
             })?
+    }
+
+    pub async fn list_findings_page(
+        &self,
+        scan_id: String,
+        severity_filter: Option<FindingSeverity>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Page<FindingSummary>, ScanError> {
+        let store = self.clone();
+        tokio::task::spawn_blocking(move || {
+            store.list_findings_page_blocking(&scan_id, severity_filter, limit, offset)
+        })
+        .await
+        .map_err(|e| ScanError::ScanStoreError(format!("Scan findings list task failed: {}", e)))?
     }
 
     fn open_connection(&self) -> Result<Connection, ScanError> {
@@ -736,6 +772,103 @@ impl ScanStore {
         }
         Ok(())
     }
+
+    fn list_findings_page_blocking(
+        &self,
+        scan_id: &str,
+        severity_filter: Option<FindingSeverity>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Page<FindingSummary>, ScanError> {
+        self.initialize_blocking()?;
+        let conn = self.open_connection()?;
+        let limit = clamp_limit(limit);
+
+        let severity_str = severity_filter.as_ref().map(finding_severity_to_str);
+
+        let total = if let Some(sev) = &severity_str {
+            count_rows(
+                &conn,
+                "SELECT COUNT(*) FROM scan_findings WHERE scan_id = ?1 AND severity = ?2",
+                params![scan_id, sev],
+            )?
+        } else {
+            count_rows(
+                &conn,
+                "SELECT COUNT(*) FROM scan_findings WHERE scan_id = ?1",
+                params![scan_id],
+            )?
+        };
+
+        let map_row = |row: &rusqlite::Row| -> Result<FindingSummary, rusqlite::Error> {
+            let finding_json: String = row.get(0)?;
+            let finding: Finding = serde_json::from_str(&finding_json).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(ScanError::SerializationError(format!(
+                        "Failed to deserialize finding: {}",
+                        e
+                    ))),
+                )
+            })?;
+            let risk_score = crate::reporting::risk::finding_risk_score(&finding);
+            Ok(FindingSummary {
+                scan_id: scan_id.to_string(),
+                finding_id: finding.id,
+                device_ip: finding.ip,
+                category: finding.category,
+                source: finding.source,
+                severity: finding.severity,
+                title: finding.title,
+                port: finding.port,
+                service: finding.service,
+                cvss_score: finding.cvss_score,
+                epss_probability: finding.epss_probability,
+                risk_score,
+                timestamp: finding.timestamp,
+            })
+        };
+
+        let mut items = Vec::new();
+
+        if let Some(sev) = severity_str {
+            let mut stmt = conn.prepare(
+                "SELECT finding_json FROM scan_findings WHERE scan_id = ?1 AND severity = ?2 ORDER BY severity ASC, timestamp DESC LIMIT ?3 OFFSET ?4",
+            ).map_err(|e| ScanError::ScanStoreError(format!("Failed to prepare findings list: {}", e)))?;
+            let rows = stmt
+                .query_map(params![scan_id, sev, limit, offset], map_row)
+                .map_err(|e| {
+                    ScanError::ScanStoreError(format!("Failed to list findings: {}", e))
+                })?;
+            for row in rows {
+                items.push(row.map_err(|e| {
+                    ScanError::ScanStoreError(format!("Failed to read finding row: {}", e))
+                })?);
+            }
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT finding_json FROM scan_findings WHERE scan_id = ?1 ORDER BY severity ASC, timestamp DESC LIMIT ?2 OFFSET ?3",
+            ).map_err(|e| ScanError::ScanStoreError(format!("Failed to prepare findings list: {}", e)))?;
+            let rows = stmt
+                .query_map(params![scan_id, limit, offset], map_row)
+                .map_err(|e| {
+                    ScanError::ScanStoreError(format!("Failed to list findings: {}", e))
+                })?;
+            for row in rows {
+                items.push(row.map_err(|e| {
+                    ScanError::ScanStoreError(format!("Failed to read finding row: {}", e))
+                })?);
+            }
+        }
+
+        Ok(Page {
+            items,
+            total,
+            limit,
+            offset,
+        })
+    }
 }
 
 fn upsert_finding_on_connection(
@@ -976,6 +1109,10 @@ mod tests {
                 evidence: Some("evidence".to_string()),
                 cve: None,
                 timestamp: 1000,
+                category: FindingCategory::ActiveCheck,
+                cvss_score: Some(7.5),
+                epss_probability: Some(0.25),
+                remediation: Some("Fix it".to_string()),
             }],
         }
     }
@@ -1068,5 +1205,105 @@ mod tests {
             .expect("list devices");
         assert_eq!(devices.total, 0);
         assert!(devices.items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_findings_page_returns_paginated_results() {
+        let tmp = tempfile::tempdir().expect("create tempdir");
+        let store = store(tmp.path());
+        store
+            .begin_session(session("scan-findings"))
+            .await
+            .expect("begin");
+        store
+            .upsert_device("scan-findings".to_string(), device("192.168.1.10"))
+            .await
+            .expect("upsert");
+
+        let page = store
+            .list_findings_page("scan-findings".to_string(), None, 10, 0)
+            .await
+            .expect("list findings");
+        assert_eq!(page.total, 1);
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].device_ip, "192.168.1.10");
+        assert!(page.items[0].risk_score > 0.0);
+
+        let filtered = store
+            .list_findings_page(
+                "scan-findings".to_string(),
+                Some(FindingSeverity::Low),
+                10,
+                0,
+            )
+            .await
+            .expect("list filtered findings");
+        assert_eq!(filtered.total, 0);
+        assert!(filtered.items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn finding_with_new_fields_roundtrips() {
+        let tmp = tempfile::tempdir().expect("create tempdir");
+        let store = store(tmp.path());
+        store
+            .begin_session(session("scan-fields"))
+            .await
+            .expect("begin");
+
+        let mut dev = device("192.168.1.50");
+        dev.findings.push(Finding {
+            id: "finding-fields".to_string(),
+            source: FindingSource::Cve,
+            severity: FindingSeverity::Critical,
+            confidence: FindingConfidence::High,
+            title: "CVE finding".to_string(),
+            description: "desc".to_string(),
+            ip: dev.ip.clone(),
+            port: Some(443),
+            service: Some("https".to_string()),
+            evidence: None,
+            cve: Some(crate::types::CveFindingDetails {
+                cve_id: "CVE-2026-9999".to_string(),
+                affected_software: "soft".to_string(),
+                affected_versions: vec!["<1".to_string()],
+                cvss_score: 9.8,
+            }),
+            timestamp: 2000,
+            category: FindingCategory::Cve,
+            cvss_score: Some(9.8),
+            epss_probability: Some(0.9),
+            remediation: Some("Patch".to_string()),
+        });
+
+        store
+            .upsert_device("scan-fields".to_string(), dev)
+            .await
+            .expect("upsert");
+
+        let loaded = store
+            .get_device("scan-fields".to_string(), "192.168.1.50".to_string())
+            .await
+            .expect("get device")
+            .expect("device exists");
+        let finding = loaded
+            .findings
+            .iter()
+            .find(|f| f.id == "finding-fields")
+            .expect("finding exists");
+        assert_eq!(finding.category, FindingCategory::Cve);
+        assert_eq!(finding.cvss_score, Some(9.8));
+        assert_eq!(finding.epss_probability, Some(0.9));
+        assert_eq!(finding.remediation.as_deref(), Some("Patch"));
+
+        let page = store
+            .list_findings_page("scan-fields".to_string(), None, 10, 0)
+            .await
+            .expect("list findings");
+        let summary = page.items.into_iter().next().expect("summary exists");
+        assert_eq!(summary.category, FindingCategory::Cve);
+        assert_eq!(summary.cvss_score, Some(9.8));
+        assert_eq!(summary.epss_probability, Some(0.9));
+        assert!(summary.risk_score > 0.0);
     }
 }

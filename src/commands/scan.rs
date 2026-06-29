@@ -153,7 +153,7 @@ pub async fn start_scan(
     // Register cancellation oneshot with state and bridge to watch channel
     let (cancel_state_tx, cancel_state_rx) = tokio::sync::oneshot::channel();
     state.set_cancel_tx(cancel_state_tx).await;
-    
+
     let cancel_tx_clone = cancel_tx.clone();
     tokio::spawn(async move {
         let _ = cancel_state_rx.await;
@@ -266,7 +266,9 @@ pub async fn start_scan(
     let ctx_c1 = ctx.clone();
     let cidr_c = cidr.clone();
     tokio::spawn(async move {
-        if let Err(e) = crate::commands::scan_pipeline::stage_target_stream(ctx_c1, cidr_c, target_tx).await {
+        if let Err(e) =
+            crate::commands::scan_pipeline::stage_target_stream(ctx_c1, cidr_c, target_tx).await
+        {
             tracing::error!("Stage 1 (Target Stream) failed: {}", e);
         }
     });
@@ -284,14 +286,20 @@ pub async fn start_scan(
             retry_count_c,
             target_rx,
             discovery_tx,
-        ).await {
+        )
+        .await
+        {
             tracing::error!("Stage 2 (Host Discovery) failed: {}", e);
         }
     });
 
     // Spawn Stage 3: Port Scan
     let ctx_c3 = ctx.clone();
-    let ports_c = if scan_ports { ports.clone() } else { Vec::new() };
+    let ports_c = if scan_ports {
+        ports.clone()
+    } else {
+        Vec::new()
+    };
     let scan_type_c = effective_scan_type.clone();
     let timing_template_c = effective_timing.clone();
     tokio::spawn(async move {
@@ -302,7 +310,9 @@ pub async fn start_scan(
             timing_template_c,
             discovery_rx,
             port_tx,
-        ).await {
+        )
+        .await
+        {
             tracing::error!("Stage 3 (Port Scan) failed: {}", e);
         }
     });
@@ -318,7 +328,9 @@ pub async fn start_scan(
             run_active_c,
             port_rx,
             enrich_tx,
-        ).await {
+        )
+        .await
+        {
             tracing::error!("Stage 4 (Enrichment) failed: {}", e);
         }
     });
@@ -326,11 +338,9 @@ pub async fn start_scan(
     // Spawn Stage 5: Finding Generation
     let ctx_c5 = ctx.clone();
     tokio::spawn(async move {
-        if let Err(e) = crate::commands::scan_pipeline::stage_finding_gen(
-            ctx_c5,
-            enrich_rx,
-            finding_tx,
-        ).await {
+        if let Err(e) =
+            crate::commands::scan_pipeline::stage_finding_gen(ctx_c5, enrich_rx, finding_tx).await
+        {
             tracing::error!("Stage 5 (Finding Gen) failed: {}", e);
         }
     });
@@ -338,11 +348,10 @@ pub async fn start_scan(
     // Spawn Stage 6: Persistence & UI Events
     let ctx_c6 = ctx.clone();
     tokio::spawn(async move {
-        if let Err(e) = crate::commands::scan_pipeline::stage_persistence_ui(
-            ctx_c6,
-            total_hosts,
-            finding_rx,
-        ).await {
+        if let Err(e) =
+            crate::commands::scan_pipeline::stage_persistence_ui(ctx_c6, total_hosts, finding_rx)
+                .await
+        {
             tracing::error!("Stage 6 (Persistence & UI) failed: {}", e);
         }
     });

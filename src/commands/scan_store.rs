@@ -4,10 +4,10 @@ use crate::commands::settings::get_config_dir;
 use crate::error::ScanError;
 use crate::network::sanitize;
 use crate::scan_store::{
-    clamp_limit, NewScanSession, Page, ScanSessionStatus, ScanSessionSummary, ScanStore,
-    StoredDeviceSummary,
+    clamp_limit, FindingSummary, NewScanSession, Page, ScanSessionStatus, ScanSessionSummary,
+    ScanStore, StoredDeviceSummary,
 };
-use crate::types::{Device, Finding};
+use crate::types::{Device, Finding, FindingSeverity};
 
 fn create_scan_store() -> Result<ScanStore, ScanError> {
     Ok(ScanStore::new(get_config_dir()?))
@@ -112,6 +112,18 @@ pub async fn get_stored_scan_device(
 pub async fn load_scan_devices(scan_id: String) -> Result<Vec<Device>, ScanError> {
     let _id = sanitize::validate_id(&scan_id)?;
     create_scan_store()?.load_all_devices(scan_id).await
+}
+
+pub async fn list_scan_findings_page(
+    scan_id: String,
+    severity_filter: Option<FindingSeverity>,
+    limit: u32,
+    offset: u32,
+) -> Result<Page<FindingSummary>, ScanError> {
+    let _id = sanitize::validate_id(&scan_id)?;
+    create_scan_store()?
+        .list_findings_page(scan_id, severity_filter, clamp_limit(limit), offset)
+        .await
 }
 
 pub async fn delete_scan_session(scan_id: String) -> Result<(), ScanError> {

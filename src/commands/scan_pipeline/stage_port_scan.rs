@@ -1,16 +1,16 @@
+use futures::stream::{self, StreamExt};
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
-use futures::stream::{self, StreamExt};
-use tokio::net::TcpStream;
-use std::time::Duration;
 
+use super::context::{wait_if_paused, PipelineContext};
 use crate::error::ScanError;
 use crate::events::AppEvent;
+use crate::network::timing::{TimingController, TimingTemplate};
 use crate::types::{Device, Port, PortState, ScanType};
-use crate::network::timing::{TimingTemplate, TimingController};
-use super::context::{PipelineContext, wait_if_paused};
 
 /// Stage 3: Port Scan
 /// Scans designated ports of live hosts using the configured scan type and timing settings.
@@ -60,7 +60,9 @@ pub async fn stage_port_scan(
     // Check privileges for UDP scan mode (same as original code)
     let mut udp_uses_raw = true;
     if scan_type == ScanType::Udp {
-        if let Ok(priv_status) = tokio::task::spawn_blocking(crate::network::privileges::check_system_privileges).await {
+        if let Ok(priv_status) =
+            tokio::task::spawn_blocking(crate::network::privileges::check_system_privileges).await
+        {
             if !priv_status.udp_scan_available {
                 udp_uses_raw = false;
             }

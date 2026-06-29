@@ -1,16 +1,16 @@
-use std::collections::HashSet;
-use std::net::{IpAddr, Ipv4Addr};
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
-use tokio::sync::mpsc;
-use tokio::task::JoinSet;
+use super::context::{wait_if_paused, PipelineContext};
 use crate::error::ScanError;
 use crate::events::AppEvent;
-use crate::types::{Device, DeviceStatus};
+use crate::network::cidr;
 use crate::network::host_discovery::{check_host_alive_with_retry, reverse_dns_lookup};
 use crate::network::oui;
-use crate::network::cidr;
-use super::context::{PipelineContext, wait_if_paused};
+use crate::types::{Device, DeviceStatus};
+use std::collections::HashSet;
+use std::net::{IpAddr, Ipv4Addr};
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use tokio::sync::mpsc;
+use tokio::task::JoinSet;
 
 const PROGRESS_INTERVAL: u32 = 10;
 
@@ -53,7 +53,12 @@ pub async fn stage_host_discovery(
     let bcast_addr = if use_arp {
         if let Ok(network) = cidr::validate_cidr(&cidr_str) {
             let ipv4 = network.ip();
-            Some(Ipv4Addr::new(ipv4.octets()[0], ipv4.octets()[1], ipv4.octets()[2], 255))
+            Some(Ipv4Addr::new(
+                ipv4.octets()[0],
+                ipv4.octets()[1],
+                ipv4.octets()[2],
+                255,
+            ))
         } else {
             None
         }
@@ -80,7 +85,10 @@ pub async fn stage_host_discovery(
             }
 
             // 3. IPv6 discovery
-            if let Ok(ipv6_devs) = crate::network::ipv6_discovery::discover_ipv6_hosts(ctx_clone.event_tx.clone()).await {
+            if let Ok(ipv6_devs) =
+                crate::network::ipv6_discovery::discover_ipv6_hosts(ctx_clone.event_tx.clone())
+                    .await
+            {
                 passive_devices.extend(ipv6_devs);
             }
 
@@ -116,7 +124,7 @@ pub async fn stage_host_discovery(
                         }
                         DiscoveryTaskResult::Active(maybe_device, ip) => {
                             let current = ctx.state.scanned_count.fetch_add(1, Ordering::SeqCst) + 1;
-                            
+
                             if current % PROGRESS_INTERVAL == 0 || current == 1 {
                                 let _ = ctx.event_tx.send(AppEvent::ScanLog {
                                     level: "debug".to_string(),
@@ -164,10 +172,10 @@ pub async fn stage_host_discovery(
 
                 // Acquire host semaphore permit before spawning
                 let sem_permit = ctx.host_semaphore.clone().acquire_owned().await;
-                
+
                 join_set.spawn(async move {
                     let _permit = sem_permit; // Hold permit during check
-                    
+
                     let is_alive = check_host_alive_with_retry(ip, retry_count as u32).await;
                     if is_alive {
                         let mut device = Device::new(ip.to_string());
@@ -203,7 +211,10 @@ pub async fn stage_host_discovery(
 
     let _ = ctx.event_tx.send(AppEvent::ScanLog {
         level: "info".to_string(),
-        message: format!("Host discovery stage complete. Found {} devices.", emitted_ips.len()),
+        message: format!(
+            "Host discovery stage complete. Found {} devices.",
+            emitted_ips.len()
+        ),
         target: None,
         timestamp: chrono::Utc::now().timestamp(),
     });

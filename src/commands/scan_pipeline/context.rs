@@ -1,8 +1,8 @@
-use std::sync::Arc;
-use tokio::sync::{mpsc, Semaphore, watch};
-use crate::state::SharedScanState;
-use crate::scan_store::ScanStore;
 use crate::events::AppEvent;
+use crate::scan_store::ScanStore;
+use crate::state::SharedScanState;
+use std::sync::Arc;
+use tokio::sync::{mpsc, watch, Semaphore};
 
 /// Shared environment and controls for all pipeline stages.
 pub struct PipelineContext {
@@ -10,13 +10,13 @@ pub struct PipelineContext {
     pub scan_store: ScanStore,
     pub scan_id: String,
     pub event_tx: mpsc::UnboundedSender<AppEvent>,
-    
+
     // Concurrency Semaphores
     pub host_semaphore: Arc<Semaphore>,
     pub port_semaphore: Arc<Semaphore>,
     pub raw_socket_semaphore: Arc<Semaphore>,
     pub enrichment_semaphore: Arc<Semaphore>,
-    
+
     // Lifecycle Watch Channels
     pub pause_rx: watch::Receiver<bool>,
     pub cancel_rx: watch::Receiver<bool>,
