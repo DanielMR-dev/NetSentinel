@@ -1,13 +1,15 @@
 ---
 name: netsentinel-pipeline
-description: Use for NetSentinel feature work that should run Planner -> Developer -> Reviewer subagents.
+description: Use for NetSentinel feature work or bug fixes that must run Planner -> Developer -> Reviewer.
 ---
 
-When invoked, spawn:
+# NetSentinel Pipeline
 
-1. planner for architecture
-2. developer for implementation
-3. reviewer for audit
+Use only the tokens necessary. Give each subagent a narrow prompt and require it to load Backend Standards and Frontend Standards.
 
-Wait for each phase before moving to the next.
-Fix CRITICAL/HIGH reviewer findings before final response.
+Flow:
+1. Planner: read-only blueprint with exact files, contracts, async/UI design, and acceptance criteria.
+2. Developer: implement only the approved scope; run `cargo fmt` and relevant checks/tests.
+3. Reviewer: audit diff for CRITICAL/HIGH issues, safety, UI blocking, locks, resources, theme, subscriptions.
+4. If Reviewer reports CRITICAL/HIGH, send only those issues back to Developer and repeat review.
+5. Final response: minimal summary, files changed, checks, reviewer approval.
