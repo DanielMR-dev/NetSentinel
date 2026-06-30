@@ -64,6 +64,8 @@ pub struct CveFindingDetails {
 #[serde(rename_all = "camelCase")]
 pub struct Finding {
     pub id: String,
+    #[serde(default)]
+    pub scan_id: String,
     pub source: FindingSource,
     pub severity: FindingSeverity,
     pub confidence: FindingConfidence,
@@ -94,6 +96,7 @@ impl Finding {
                 &cve.port.to_string(),
                 &cve.cve_id.to_lowercase(),
             ]),
+            scan_id: String::new(),
             source: FindingSource::Cve,
             severity: FindingSeverity::from(&cve.severity),
             confidence: FindingConfidence::Medium,
@@ -127,6 +130,7 @@ impl Finding {
 
         Some(Self {
             id: stable_finding_id(&["active", ip, &check.vulnerability_name.to_lowercase()]),
+            scan_id: String::new(),
             source: FindingSource::ActiveCheck,
             severity: FindingSeverity::High,
             confidence: FindingConfidence::Confirmed,
@@ -161,6 +165,7 @@ impl Finding {
                     "exposed-directories",
                     &audit.exposed_directories.join("|").to_lowercase(),
                 ]),
+                scan_id: String::new(),
                 source: FindingSource::WebAudit,
                 severity: FindingSeverity::Medium,
                 confidence: FindingConfidence::High,
@@ -190,6 +195,7 @@ impl Finding {
                     "x-powered-by",
                     &powered_by.to_lowercase(),
                 ]),
+                scan_id: String::new(),
                 source: FindingSource::WebAudit,
                 severity: FindingSeverity::Low,
                 confidence: FindingConfidence::High,
@@ -223,6 +229,7 @@ impl Finding {
             let title = "Expired TLS certificate".to_string();
             findings.push(Self {
                 id: stable_finding_id(&["tls", ip, &port.to_string(), &title.to_lowercase()]),
+                scan_id: String::new(),
                 source: FindingSource::WebAudit,
                 severity: FindingSeverity::Critical,
                 confidence: FindingConfidence::Confirmed,
@@ -250,6 +257,7 @@ impl Finding {
             let title = "Self-signed TLS certificate".to_string();
             findings.push(Self {
                 id: stable_finding_id(&["tls", ip, &port.to_string(), &title.to_lowercase()]),
+                scan_id: String::new(),
                 source: FindingSource::WebAudit,
                 severity: FindingSeverity::High,
                 confidence: FindingConfidence::Confirmed,
@@ -279,6 +287,7 @@ impl Finding {
             let title = "Weak TLS protocol version".to_string();
             findings.push(Self {
                 id: stable_finding_id(&["tls", ip, &port.to_string(), &title.to_lowercase()]),
+                scan_id: String::new(),
                 source: FindingSource::WebAudit,
                 severity: FindingSeverity::Medium,
                 confidence: FindingConfidence::Confirmed,
@@ -304,6 +313,7 @@ impl Finding {
             let title = "TLS certificate expiring soon".to_string();
             findings.push(Self {
                 id: stable_finding_id(&["tls", ip, &port.to_string(), &title.to_lowercase()]),
+                scan_id: String::new(),
                 source: FindingSource::WebAudit,
                 severity: FindingSeverity::Low,
                 confidence: FindingConfidence::Confirmed,
@@ -341,6 +351,7 @@ impl Finding {
                 &issue.framework.to_lowercase(),
                 &issue.rule.to_lowercase(),
             ]),
+            scan_id: String::new(),
             source: FindingSource::ActiveCheck,
             severity,
             confidence: FindingConfidence::High,
@@ -357,6 +368,11 @@ impl Finding {
             epss_probability: None,
             remediation: Some(format!("{} — review and remediate.", issue.rule)),
         }
+    }
+
+    pub fn with_scan_id(mut self, scan_id: impl Into<String>) -> Self {
+        self.scan_id = scan_id.into();
+        self
     }
 }
 

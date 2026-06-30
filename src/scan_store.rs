@@ -1098,6 +1098,7 @@ mod tests {
             web_audits: Vec::new(),
             findings: vec![Finding {
                 id: format!("finding-{}", ip),
+                scan_id: String::new(),
                 source: FindingSource::ActiveCheck,
                 severity: FindingSeverity::High,
                 confidence: FindingConfidence::Confirmed,
@@ -1254,6 +1255,7 @@ mod tests {
         let mut dev = device("192.168.1.50");
         dev.findings.push(Finding {
             id: "finding-fields".to_string(),
+            scan_id: String::new(),
             source: FindingSource::Cve,
             severity: FindingSeverity::Critical,
             confidence: FindingConfidence::High,

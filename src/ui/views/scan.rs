@@ -158,6 +158,57 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         content = content.push(widgets::card(Some("Findings Summary"), summary));
     }
 
+    // ── Global Findings List ────────────────────────────────────────────
+    if app.is_scanning || !app.findings.is_empty() {
+        let findings_content: iced::Element<'_, Message> = if app.findings.is_empty() {
+            container(
+                column![text(
+                    "No findings yet — vulnerabilities will appear here as the scan progresses."
+                )
+                .color(TEXT_MUTED)
+                .size(13),]
+                .align_x(Alignment::Center),
+            )
+            .center_x(Length::Fill)
+            .center_y(Length::Fixed(220.0))
+            .style(theme::empty_state_style)
+            .into()
+        } else {
+            let mut findings_list = column![].spacing(6);
+            for finding in &app.findings {
+                let target = finding
+                    .port
+                    .map(|port| format!("{}:{}", finding.ip, port))
+                    .unwrap_or_else(|| finding.ip.clone());
+                let evidence = finding
+                    .evidence
+                    .as_ref()
+                    .map(|evidence| format!(" - {}", truncate_chars(evidence, 60)))
+                    .unwrap_or_default();
+
+                findings_list = findings_list.push(
+                    column![
+                        row![
+                            widgets::finding_severity_badge(&finding.severity),
+                            text(&finding.title).color(TEXT).size(12),
+                        ]
+                        .spacing(8)
+                        .align_y(Alignment::Center),
+                        text(format!("{}{}", target, evidence))
+                            .color(TEXT_MUTED)
+                            .size(11),
+                    ]
+                    .spacing(4),
+                );
+            }
+            scrollable(findings_list)
+                .height(Length::Fixed(220.0))
+                .into()
+        };
+
+        content = content.push(widgets::card(Some("Findings"), findings_content));
+    }
+
     // ── Toolbar Header (Title, Exports) ─────────────────────────────────
     let toolbar = row![
         text(format!(

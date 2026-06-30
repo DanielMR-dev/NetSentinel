@@ -58,6 +58,9 @@ pub enum AppEvent {
     /// A normalized security finding was found.
     FindingFound(Finding),
 
+    /// A batch of normalized security findings was discovered.
+    FindingsDiscovered(Vec<Finding>),
+
     // ---- Privilege Events ----
     /// Privilege status report (emmited at startup and on-demmand)
     PrivilegeStatus(PrivilegeStatus),

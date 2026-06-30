@@ -82,10 +82,10 @@ pub async fn stage_finding_gen(
                             .await;
 
                         for cve in cve_results.into_iter().flatten() {
-                            let finding = Finding::from_cve(&cve);
+                            let finding = Finding::from_cve(&cve)
+                                .with_scan_id(ctx_c.scan_id.clone());
                             let _ = ctx_c.event_tx.send(AppEvent::CveAlert(cve));
                             if push_unique_finding(&mut device.findings, finding.clone()) {
-                                let _ = ctx_c.event_tx.send(AppEvent::FindingFound(finding.clone()));
                                 new_findings.push(finding);
                             }
                         }
@@ -95,10 +95,10 @@ pub async fn stage_finding_gen(
                     let web_findings: Vec<Finding> = device.web_audits
                         .iter()
                         .flat_map(Finding::from_web_audit)
+                        .map(|finding| finding.with_scan_id(ctx_c.scan_id.clone()))
                         .collect();
                     for finding in web_findings {
                         if push_unique_finding(&mut device.findings, finding.clone()) {
-                            let _ = ctx_c.event_tx.send(AppEvent::FindingFound(finding.clone()));
                             new_findings.push(finding);
                         }
                     }
@@ -107,10 +107,10 @@ pub async fn stage_finding_gen(
                     let active_findings: Vec<Finding> = device.active_checks
                         .iter()
                         .filter_map(|check| Finding::from_active_check(&device.ip, check))
+                        .map(|finding| finding.with_scan_id(ctx_c.scan_id.clone()))
                         .collect();
                     for finding in active_findings {
                         if push_unique_finding(&mut device.findings, finding.clone()) {
-                            let _ = ctx_c.event_tx.send(AppEvent::FindingFound(finding.clone()));
                             new_findings.push(finding);
                         }
                     }
@@ -153,21 +153,29 @@ pub async fn stage_finding_gen(
                         .iter()
                         .filter_map(|b| b.tls_info.as_ref().map(|tls| (b.port, tls)))
                         .flat_map(|(port, tls)| Finding::from_tls(&device.ip, port, tls))
+                        .map(|finding| finding.with_scan_id(ctx_c.scan_id.clone()))
                         .collect();
                     for finding in tls_findings {
                         if push_unique_finding(&mut device.findings, finding.clone()) {
-                            let _ = ctx_c.event_tx.send(AppEvent::FindingFound(finding.clone()));
                             new_findings.push(finding);
                         }
                     }
 
                     // 6. Compliance findings
-                    let compliance_findings = ComplianceEngine::audit_device_findings(&device);
+                    let compliance_findings = ComplianceEngine::audit_device_findings(&device)
+                        .into_iter()
+                        .map(|finding| finding.with_scan_id(ctx_c.scan_id.clone()))
+                        .collect::<Vec<_>>();
                     for finding in compliance_findings {
                         if push_unique_finding(&mut device.findings, finding.clone()) {
-                            let _ = ctx_c.event_tx.send(AppEvent::FindingFound(finding.clone()));
                             new_findings.push(finding);
                         }
+                    }
+
+                    if !new_findings.is_empty() {
+                        let _ = ctx_c
+                            .event_tx
+                            .send(AppEvent::FindingsDiscovered(new_findings.clone()));
                     }
 
                     Ok::<(Device, Vec<Finding>), ScanError>((device, new_findings))

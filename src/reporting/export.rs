@@ -1241,6 +1241,7 @@ mod tests {
         let mut device = Device::new("192.0.2.30".to_string());
         device.findings.push(Finding {
             id: "finding-html".to_string(),
+            scan_id: String::new(),
             source: FindingSource::WebAudit,
             severity: FindingSeverity::High,
             confidence: FindingConfidence::High,

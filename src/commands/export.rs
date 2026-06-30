@@ -171,6 +171,7 @@ mod tests {
         let mut dev = Device::new("192.168.1.7".to_string());
         dev.findings.push(crate::types::Finding {
             id: "finding-1".to_string(),
+            scan_id: String::new(),
             source: crate::types::FindingSource::WebAudit,
             severity: FindingSeverity::High,
             confidence: crate::types::FindingConfidence::High,

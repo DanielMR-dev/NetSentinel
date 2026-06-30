@@ -132,6 +132,7 @@ pub enum Message {
     },
     CveAlertReceived(CveMatch),
     FindingReceived(Finding),
+    FindingsReceived(Vec<Finding>),
     ScanStartResult(Result<String, String>),
     ScanStopResult(Result<(), String>),
 
@@ -578,6 +579,16 @@ impl NetSentinelApp {
     }
 
     fn refresh_finding_counts(&mut self) {
+        let severity_rank = |severity: &FindingSeverity| match severity {
+            FindingSeverity::Critical => 0,
+            FindingSeverity::High => 1,
+            FindingSeverity::Medium => 2,
+            FindingSeverity::Low => 3,
+            FindingSeverity::Info => 4,
+        };
+        self.findings
+            .sort_by_key(|finding| severity_rank(&finding.severity));
+
         let mut counts = FindingCounts::default();
         for finding in &self.findings {
             match &finding.severity {
@@ -878,6 +889,13 @@ impl NetSentinelApp {
 
             Message::FindingReceived(finding) => {
                 self.merge_finding(finding);
+                Task::none()
+            }
+
+            Message::FindingsReceived(findings) => {
+                for finding in findings {
+                    self.merge_finding(finding);
+                }
                 Task::none()
             }
 
@@ -1594,6 +1612,7 @@ impl NetSentinelApp {
 
                 if let Some(ref mut rx) = receiver {
                     let mut buffer = Vec::new();
+                    let mut findings_buffer = Vec::new();
                     let mut interval = tokio::time::interval(std::time::Duration::from_millis(200));
 
                     loop {
@@ -1602,6 +1621,12 @@ impl NetSentinelApp {
                                 if !buffer.is_empty() {
                                     let batch = std::mem::take(&mut buffer);
                                     if output.send(Message::DevicesDiscovered(batch)).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                if !findings_buffer.is_empty() {
+                                    let batch = std::mem::take(&mut findings_buffer);
+                                    if output.send(Message::FindingsReceived(batch)).await.is_err() {
                                         break;
                                     }
                                 }
@@ -1628,9 +1653,10 @@ impl NetSentinelApp {
                                         }
                                     }
                                     Some(AppEvent::FindingFound(finding)) => {
-                                        if output.send(Message::FindingReceived(finding)).await.is_err() {
-                                            break;
-                                        }
+                                        findings_buffer.push(finding);
+                                    }
+                                    Some(AppEvent::FindingsDiscovered(findings)) => {
+                                        findings_buffer.extend(findings);
                                     }
                                     Some(_) => {} // Ignore other events for IPC
                                     None => break, // Channel closed
@@ -1652,6 +1678,7 @@ impl NetSentinelApp {
 
                     if let Some(ref mut rx) = receiver {
                         let mut buffer = Vec::new();
+                        let mut findings_buffer = Vec::new();
                         let mut interval = tokio::time::interval(std::time::Duration::from_millis(200));
 
                         loop {
@@ -1660,6 +1687,12 @@ impl NetSentinelApp {
                                     if !buffer.is_empty() {
                                         let batch = std::mem::take(&mut buffer);
                                         if output.send(Message::DevicesDiscovered(batch)).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                    if !findings_buffer.is_empty() {
+                                        let batch = std::mem::take(&mut findings_buffer);
+                                        if output.send(Message::FindingsReceived(batch)).await.is_err() {
                                             break;
                                         }
                                     }
@@ -1677,6 +1710,10 @@ impl NetSentinelApp {
                                                 let batch = std::mem::take(&mut buffer);
                                                 let _ = output.send(Message::DevicesDiscovered(batch)).await;
                                             }
+                                            if !findings_buffer.is_empty() {
+                                                let batch = std::mem::take(&mut findings_buffer);
+                                                let _ = output.send(Message::FindingsReceived(batch)).await;
+                                            }
                                             if output.send(Message::ScanCompleted { scan_id, device_count, duration_ms, devices, status }).await.is_err() { break; }
                                         }
                                         Some(AppEvent::ScanLog { level, message, target, timestamp }) => {
@@ -1686,7 +1723,10 @@ impl NetSentinelApp {
                                             if output.send(Message::CveAlertReceived(cve)).await.is_err() { break; }
                                         }
                                         Some(AppEvent::FindingFound(finding)) => {
-                                            if output.send(Message::FindingReceived(finding)).await.is_err() { break; }
+                                            findings_buffer.push(finding);
+                                        }
+                                        Some(AppEvent::FindingsDiscovered(findings)) => {
+                                            findings_buffer.extend(findings);
                                         }
                                         Some(_) => {}
                                         None => break,

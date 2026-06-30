@@ -51,6 +51,7 @@ mod tests {
     fn sample_finding(severity: FindingSeverity, cvss: Option<f64>, epss: Option<f64>) -> Finding {
         Finding {
             id: "finding-1".to_string(),
+            scan_id: String::new(),
             source: FindingSource::Cve,
             severity,
             confidence: FindingConfidence::Medium,
