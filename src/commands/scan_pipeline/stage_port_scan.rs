@@ -6,7 +6,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
-use super::context::{wait_if_paused, PipelineContext};
+use super::context::{emit_stage_lifecycle, wait_if_paused, PipelineContext};
 use crate::error::ScanError;
 use crate::events::AppEvent;
 use crate::network::timing::{TimingController, TimingTemplate};
@@ -34,6 +34,7 @@ pub async fn stage_port_scan(
             target: None,
             timestamp: chrono::Utc::now().timestamp(),
         });
+        emit_stage_lifecycle(ctx.as_ref(), "port_scan", "skipped");
         while let Some(device) = in_rx.recv().await {
             wait_if_paused(&mut pause_rx).await;
             if *cancel_rx.borrow() {
@@ -56,6 +57,7 @@ pub async fn stage_port_scan(
         target: None,
         timestamp: chrono::Utc::now().timestamp(),
     });
+    emit_stage_lifecycle(ctx.as_ref(), "port_scan", "started");
 
     // Check privileges for UDP scan mode (same as original code)
     let mut udp_uses_raw = true;
@@ -119,7 +121,6 @@ pub async fn stage_port_scan(
                 let ports_c = ports.clone();
                 let scan_type_c = scan_type.clone();
                 let timing_c = timing_template.clone();
-
                 // Acquire raw socket permit if it's a raw scan type
                 let is_raw = matches!(
                     scan_type_c,
@@ -207,6 +208,7 @@ pub async fn stage_port_scan(
         }
     }
 
+    emit_stage_lifecycle(ctx.as_ref(), "port_scan", "complete");
     Ok(())
 }
 

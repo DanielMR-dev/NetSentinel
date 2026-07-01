@@ -11,6 +11,7 @@ pub mod history_adapter;
 pub mod ipc;
 pub mod network;
 pub mod reporting;
+pub mod scan_plan;
 pub mod scan_store;
 pub mod settings;
 pub mod state;

@@ -6,6 +6,7 @@ use iced::widget::{
 };
 use iced::{Alignment, Length};
 
+use crate::scan_plan::ScanMode;
 use crate::types::ScanType;
 use crate::ui::theme::{self, DANGER, TEXT, TEXT_MUTED, WARNING};
 use crate::ui::widgets;
@@ -71,6 +72,15 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     .text_size(14)
     .width(Length::Fill);
 
+    let scan_mode_picker = pick_list(
+        ScanMode::all(),
+        Some(app.scan_mode),
+        Message::ScanModeSelected,
+    )
+    .padding(10)
+    .text_size(14)
+    .width(Length::Fill);
+
     let start_btn =
         button(row![text("Start Scan").color(TEXT).size(15)].align_y(Alignment::Center))
             .padding([10, 24])
@@ -111,6 +121,9 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         ]
         .spacing(6)
         .width(Length::FillPortion(2)),
+        column![text("Mode").color(TEXT_MUTED).size(12), scan_mode_picker,]
+            .spacing(6)
+            .width(Length::FillPortion(2)),
         column![
             text("").size(12), // Spacer to align with inputs
             controls,

@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::error::ScanError;
 use crate::network::timing::TimingTemplate;
 use crate::network::web_audit::WebAuditProfile;
+use crate::scan_plan::ScanMode;
 
 /// Discovery method enumeration - serialized as lowercase strings
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -59,6 +60,8 @@ pub struct ScanConfig {
     pub web_audit_profile: WebAuditProfile,
     /// Whether to run active vulnerability checks
     pub run_active_checks: bool,
+    /// High-level scan mode controlling pipeline stages.
+    pub scan_mode: ScanMode,
 }
 
 impl Default for ScanConfig {
@@ -75,6 +78,7 @@ impl Default for ScanConfig {
             timing_template: TimingTemplate::Normal,
             web_audit_profile: WebAuditProfile::Safe,
             run_active_checks: false,
+            scan_mode: ScanMode::FullAudit,
         }
     }
 }

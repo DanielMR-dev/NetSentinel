@@ -5,7 +5,7 @@ use tokio::task::JoinSet;
 
 use futures::stream::{self, StreamExt};
 
-use super::context::{wait_if_paused, PipelineContext};
+use super::context::{emit_stage_lifecycle, wait_if_paused, PipelineContext};
 use crate::error::ScanError;
 use crate::events::AppEvent;
 use crate::network::active_checks::run_active_checks;
@@ -35,6 +35,7 @@ pub async fn stage_enrichment(
         target: None,
         timestamp: chrono::Utc::now().timestamp(),
     });
+    emit_stage_lifecycle(ctx.as_ref(), "enrichment", "started");
 
     loop {
         tokio::select! {
@@ -224,5 +225,6 @@ pub async fn stage_enrichment(
         }
     }
 
+    emit_stage_lifecycle(ctx.as_ref(), "enrichment", "complete");
     Ok(())
 }

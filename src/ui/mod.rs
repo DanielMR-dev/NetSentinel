@@ -151,6 +151,7 @@ pub enum Message {
     ScanCidrChanged(String),
     ScanPortsChanged(String),
     ScanTypeSelected(ScanType),
+    ScanModeSelected(crate::scan_plan::ScanMode),
     StartScanRequested,
     StartScanConfirmed,
     StartScanCancelled,
@@ -305,12 +306,15 @@ pub struct NetSentinelApp {
     scan_cidr: String,
     scan_ports_str: String,
     scan_type: ScanType,
+    scan_mode: crate::scan_plan::ScanMode,
     scan_cidr_error: Option<String>,
     scan_ports_error: Option<String>,
     scan_ports_warning: Option<String>,
     show_scan_confirm: bool,
     scan_confirm_estimated_hosts: u32,
     scan_confirm_port_summary: String,
+    scan_confirm_risk_label: String,
+    scan_confirm_work_units: u64,
     scan_confirm_warnings: Vec<String>,
     is_scanning: bool,
     is_paused: bool,
@@ -390,12 +394,15 @@ impl NetSentinelApp {
                 "21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1723,3306,3389,5900,8080"
                     .to_string(),
             scan_type: ScanType::Connect,
+            scan_mode: crate::scan_plan::ScanMode::FullAudit,
             scan_cidr_error: None,
             scan_ports_error: None,
             scan_ports_warning: None,
             show_scan_confirm: false,
             scan_confirm_estimated_hosts: 0,
             scan_confirm_port_summary: String::new(),
+            scan_confirm_risk_label: String::new(),
+            scan_confirm_work_units: 0,
             scan_confirm_warnings: Vec::new(),
             is_scanning: false,
             is_paused: false,
@@ -740,17 +747,28 @@ impl NetSentinelApp {
     }
 
     fn prepare_scan_confirmation(&mut self) {
-        self.scan_confirm_estimated_hosts =
-            crate::network::sanitize::validate_cidr(&self.scan_cidr)
-                .map(|network| {
-                    let prefix = network.prefix();
-                    if prefix >= 32 {
-                        1
+        let ports_per_host = if self.settings_profile.scan_config.scan_ports_enabled {
+            crate::network::sanitize::parse_port_expression(&self.scan_ports_str)
+                .map(|(ports, _)| {
+                    if ports.is_empty() {
+                        self.settings_profile.scan_config.effective_ports().len()
                     } else {
-                        2u32.saturating_pow(u32::from(32 - prefix))
+                        ports.len()
                     }
                 })
-                .unwrap_or(0);
+                .unwrap_or_else(|_| self.settings_profile.scan_config.effective_ports().len())
+        } else {
+            0
+        };
+
+        let estimate =
+            crate::scan_plan::estimate_scan(&self.scan_cidr, ports_per_host, self.scan_mode).ok();
+        self.scan_confirm_estimated_hosts = estimate.as_ref().map(|value| value.hosts).unwrap_or(0);
+        self.scan_confirm_risk_label = estimate
+            .as_ref()
+            .map(|value| value.risk.to_string())
+            .unwrap_or_else(|| "Unknown".to_string());
+        self.scan_confirm_work_units = estimate.as_ref().map(|value| value.work_units).unwrap_or(0);
 
         self.scan_confirm_port_summary = if self.settings_profile.scan_config.scan_ports_enabled {
             match crate::network::sanitize::parse_port_expression(&self.scan_ports_str) {
@@ -761,13 +779,7 @@ impl NetSentinelApp {
             "host discovery only".to_string()
         };
 
-        let mut warnings = Vec::new();
-        if self.scan_confirm_estimated_hosts > 256 {
-            warnings.push(format!(
-                "Large target range: {} hosts. This may take a while.",
-                self.scan_confirm_estimated_hosts
-            ));
-        }
+        let mut warnings = estimate.map(|value| value.warnings).unwrap_or_default();
 
         let elevated = self
             .platform_caps
@@ -798,6 +810,7 @@ impl NetSentinelApp {
     fn apply_guided_profile(&mut self, profile: GuidedScanProfile) -> Vec<String> {
         use crate::network::timing::TimingTemplate;
         use crate::network::web_audit::WebAuditProfile;
+        use crate::scan_plan::ScanMode;
         use crate::settings::SettingsDiscoveryMethod;
         use crate::types::ScanType;
 
@@ -811,6 +824,7 @@ impl NetSentinelApp {
             web_audit_profile,
             max_hosts,
             max_ports,
+            scan_mode,
         ) = match profile {
             GuidedScanProfile::FastDiscovery => (
                 ScanType::Connect,
@@ -820,6 +834,7 @@ impl NetSentinelApp {
                 WebAuditProfile::Safe,
                 100,
                 100,
+                ScanMode::DiscoveryOnly,
             ),
             GuidedScanProfile::StandardAudit => (
                 ScanType::Connect,
@@ -829,6 +844,7 @@ impl NetSentinelApp {
                 WebAuditProfile::Safe,
                 50,
                 100,
+                ScanMode::FullAudit,
             ),
             GuidedScanProfile::DeepAudit => (
                 ScanType::Connect,
@@ -838,6 +854,7 @@ impl NetSentinelApp {
                 WebAuditProfile::Aggressive,
                 50,
                 100,
+                ScanMode::FullAudit,
             ),
             GuidedScanProfile::WebServicesAudit => (
                 ScanType::Connect,
@@ -847,6 +864,7 @@ impl NetSentinelApp {
                 WebAuditProfile::Aggressive,
                 50,
                 100,
+                ScanMode::FullAudit,
             ),
             GuidedScanProfile::StealthRawScan => (
                 ScanType::Syn,
@@ -856,6 +874,7 @@ impl NetSentinelApp {
                 WebAuditProfile::Safe,
                 50,
                 100,
+                ScanMode::FullAudit,
             ),
         };
 
@@ -866,7 +885,10 @@ impl NetSentinelApp {
         self.settings_profile.scan_config.web_audit_profile = web_audit_profile;
         self.settings_profile.scan_config.max_concurrent_hosts = max_hosts;
         self.settings_profile.scan_config.max_concurrent_ports = max_ports;
-        self.settings_profile.scan_config.scan_ports_enabled = true;
+        self.scan_mode = scan_mode;
+        self.settings_profile.scan_config.scan_mode = scan_mode;
+        self.settings_profile.scan_config.scan_ports_enabled =
+            !matches!(scan_mode, ScanMode::DiscoveryOnly);
         self.settings_profile.scan_config.discovery_methods = vec![SettingsDiscoveryMethod::All];
 
         if matches!(
@@ -984,6 +1006,8 @@ impl NetSentinelApp {
                 }
 
                 let scan_ports_enabled = self.settings_profile.scan_config.scan_ports_enabled;
+                let scan_ports_enabled = scan_ports_enabled
+                    && !matches!(self.scan_mode, crate::scan_plan::ScanMode::DiscoveryOnly);
 
                 // Resolve ports from the scan page input or from settings.
                 let parsed_ports = if scan_ports_enabled {
@@ -1044,6 +1068,7 @@ impl NetSentinelApp {
                 let timing_template = self.settings_profile.scan_config.timing_template;
                 let web_audit_profile = self.settings_profile.scan_config.web_audit_profile;
                 let run_active_checks = self.settings_profile.scan_config.run_active_checks;
+                let scan_mode = self.scan_mode;
 
                 Task::perform(
                     async move {
@@ -1062,6 +1087,7 @@ impl NetSentinelApp {
                             Some(timing_template),
                             Some(web_audit_profile),
                             Some(run_active_checks),
+                            Some(scan_mode),
                         )
                         .await
                         .map(|r| r.scan_id)
@@ -1084,8 +1110,31 @@ impl NetSentinelApp {
                 }
 
                 let is_first_use = self.history_entries.is_empty();
-                if self.settings_profile.ui_preferences.confirm_before_scan || is_first_use {
-                    self.prepare_scan_confirmation();
+                self.prepare_scan_confirmation();
+                let requires_large_scan_confirmation = crate::scan_plan::estimate_scan(
+                    &self.scan_cidr,
+                    if self.settings_profile.scan_config.scan_ports_enabled {
+                        crate::network::sanitize::parse_port_expression(&self.scan_ports_str)
+                            .map(|(ports, _)| {
+                                if ports.is_empty() {
+                                    self.settings_profile.scan_config.effective_ports().len()
+                                } else {
+                                    ports.len()
+                                }
+                            })
+                            .unwrap_or(0)
+                    } else {
+                        0
+                    },
+                    self.scan_mode,
+                )
+                .map(|estimate| estimate.requires_confirmation)
+                .unwrap_or(false);
+
+                if self.settings_profile.ui_preferences.confirm_before_scan
+                    || is_first_use
+                    || requires_large_scan_confirmation
+                {
                     self.show_scan_confirm = true;
                     Task::none()
                 } else {
@@ -1167,6 +1216,14 @@ impl NetSentinelApp {
 
             Message::ScanTypeSelected(scan_type) => {
                 self.scan_type = scan_type;
+                Task::none()
+            }
+
+            Message::ScanModeSelected(scan_mode) => {
+                if scan_mode.is_supported() {
+                    self.scan_mode = scan_mode;
+                    self.settings_profile.scan_config.scan_mode = scan_mode;
+                }
                 Task::none()
             }
 
@@ -1384,6 +1441,12 @@ impl NetSentinelApp {
                 match result {
                     Ok(profile) => {
                         self.settings_profile = profile.clone();
+                        self.scan_mode = if profile.scan_config.scan_mode.is_supported() {
+                            profile.scan_config.scan_mode
+                        } else {
+                            crate::scan_plan::ScanMode::FullAudit
+                        };
+                        self.settings_profile.scan_config.scan_mode = self.scan_mode;
                         // Sync profile default CIDR if it has been customized
                         if profile.scan_config.default_cidr != "192.168.1.0/24"
                             && !profile.scan_config.default_cidr.is_empty()
@@ -1418,7 +1481,13 @@ impl NetSentinelApp {
 
             Message::ProfileSelected(id) => {
                 if let Some(profile) = self.settings_profiles.iter().find(|p| p.id == id).cloned() {
+                    self.scan_mode = if profile.scan_config.scan_mode.is_supported() {
+                        profile.scan_config.scan_mode
+                    } else {
+                        crate::scan_plan::ScanMode::FullAudit
+                    };
                     self.settings_profile = profile;
+                    self.settings_profile.scan_config.scan_mode = self.scan_mode;
                 }
                 Task::none()
             }
@@ -2145,9 +2214,18 @@ impl NetSentinelApp {
             text(format!("Scan type: {}", self.scan_type))
                 .color(theme::TEXT_MUTED)
                 .size(13),
+            text(format!("Mode: {}", self.scan_mode))
+                .color(theme::TEXT_MUTED)
+                .size(13),
             text(format!("Ports: {}", self.scan_confirm_port_summary))
                 .color(theme::TEXT_MUTED)
                 .size(13),
+            text(format!(
+                "Estimated work: {} checks — Risk: {}",
+                self.scan_confirm_work_units, self.scan_confirm_risk_label
+            ))
+            .color(theme::TEXT_MUTED)
+            .size(13),
             warning_col,
             text("Only scan networks you own or have explicit permission to test.")
                 .color(theme::DANGER)
@@ -2255,6 +2333,16 @@ impl NetSentinelApp {
                                     Some(AppEvent::FindingsDiscovered(findings)) => {
                                         findings_buffer.extend(findings);
                                     }
+                                    Some(AppEvent::HostLifecycle { host, stage, status, timestamp }) => {
+                                        if output.send(Message::ScanLogReceived {
+                                            level: "debug".to_string(),
+                                            message: format!("Host lifecycle: {} {}", stage, status),
+                                            target: Some(host),
+                                            timestamp,
+                                        }).await.is_err() {
+                                            break;
+                                        }
+                                    }
                                     Some(_) => {} // Ignore other events for IPC
                                     None => break, // Channel closed
                                 }
@@ -2324,6 +2412,14 @@ impl NetSentinelApp {
                                         }
                                         Some(AppEvent::FindingsDiscovered(findings)) => {
                                             findings_buffer.extend(findings);
+                                        }
+                                        Some(AppEvent::HostLifecycle { host, stage, status, timestamp }) => {
+                                            if output.send(Message::ScanLogReceived {
+                                                level: "debug".to_string(),
+                                                message: format!("Host lifecycle: {} {}", stage, status),
+                                                target: Some(host),
+                                                timestamp,
+                                            }).await.is_err() { break; }
                                         }
                                         Some(_) => {}
                                         None => break,

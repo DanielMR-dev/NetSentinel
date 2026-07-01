@@ -300,12 +300,14 @@ fn reverse_dns_lookup_blocking(ip: &str) -> Option<String> {
 ///
 /// Retries the probe up to `retry_count` times if the initial attempt fails.
 pub async fn check_host_alive_with_retry(ip: IpAddr, retry_count: u32) -> bool {
+    let policy = crate::scan_plan::RetryPolicy::default();
     for attempt in 0..=retry_count {
         if check_host_alive(ip).await {
             return true;
         }
         if attempt < retry_count {
             tracing::debug!("Retry {}/{} for host {}", attempt + 1, retry_count, ip);
+            tokio::time::sleep(policy.backoff_delay(attempt as u8)).await;
         }
     }
     false

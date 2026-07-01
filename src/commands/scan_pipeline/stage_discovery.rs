@@ -1,4 +1,4 @@
-use super::context::{wait_if_paused, PipelineContext};
+use super::context::{emit_stage_lifecycle, wait_if_paused, PipelineContext};
 use crate::error::ScanError;
 use crate::events::AppEvent;
 use crate::network::cidr;
@@ -107,6 +107,7 @@ pub async fn stage_host_discovery(
         target: None,
         timestamp: chrono::Utc::now().timestamp(),
     });
+    emit_stage_lifecycle(ctx.as_ref(), "discovery", "started");
 
     // Reconstruct network for broadcast address if ARP/NetBIOS is enabled
     let bcast_addr = if use_arp {
@@ -257,6 +258,11 @@ pub async fn stage_host_discovery(
         target: None,
         timestamp: chrono::Utc::now().timestamp(),
     });
+    emit_stage_lifecycle(
+        ctx.as_ref(),
+        "discovery",
+        &format!("complete_found_{}", emitted_ips.len()),
+    );
 
     Ok(())
 }

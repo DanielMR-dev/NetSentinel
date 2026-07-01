@@ -48,6 +48,14 @@ pub enum AppEvent {
         timestamp: i64,
     },
 
+    /// Per-host lifecycle status from pipeline stages.
+    HostLifecycle {
+        host: String,
+        stage: String,
+        status: String,
+        timestamp: i64,
+    },
+
     // ---- Banner / CVE events ----
     /// A service banner was grabbed from an open port
     BannerFound(BannerResult),

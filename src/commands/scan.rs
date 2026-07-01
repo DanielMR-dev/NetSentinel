@@ -22,6 +22,10 @@ use crate::error::ScanError;
 use crate::events::AppEvent;
 use crate::network::timing::TimingTemplate;
 use crate::network::{cidr, icmp, sanitize};
+use crate::scan_plan::{
+    safe_concurrency_defaults, ScanMode, DISCOVERY_CHANNEL_CAPACITY, ENRICH_CHANNEL_CAPACITY,
+    FINDING_CHANNEL_CAPACITY, PORT_CHANNEL_CAPACITY, TARGET_CHANNEL_CAPACITY,
+};
 use crate::scan_store::{ScanSession, ScanSessionStatus, ScanStore, StoredScanConfig};
 use crate::state::SharedScanState;
 use crate::types::{Device, ScanResponse, ScanResultsResponse, ScanType};
@@ -46,6 +50,7 @@ pub async fn start_scan(
     timing_template: Option<TimingTemplate>,
     web_audit_profile: Option<crate::network::web_audit::WebAuditProfile>,
     run_active_checks: Option<bool>,
+    scan_mode: Option<ScanMode>,
 ) -> Result<ScanResponse, ScanError> {
     // --- Input Validation ---
     let _validated_cidr = sanitize::validate_cidr(&cidr)?;
@@ -57,6 +62,13 @@ pub async fn start_scan(
 
     let mut effective_scan_type = scan_type.unwrap_or_default();
     let effective_timing = timing_template.unwrap_or_default();
+    let effective_scan_mode = scan_mode.unwrap_or_default();
+    if !effective_scan_mode.is_supported() {
+        return Err(ScanError::InvalidInput(format!(
+            "Unsupported scan mode: {}",
+            effective_scan_mode
+        )));
+    }
 
     // Helper closure to send log events
     let send_log = |level: &str, message: &str, target: Option<&str>| {
@@ -145,8 +157,15 @@ pub async fn start_scan(
     state.set_total_hosts(total_hosts);
 
     // Resolve settings parameters
-    let effective_max_concurrent = max_concurrent_hosts.unwrap_or(50) as usize;
-    let effective_max_concurrent_ports = max_concurrent_ports.unwrap_or(100) as usize;
+    let (safe_hosts, safe_ports) = safe_concurrency_defaults(total_hosts as usize, ports.len());
+    let effective_max_concurrent = max_concurrent_hosts
+        .map(|value| value as usize)
+        .unwrap_or(safe_hosts)
+        .min(safe_hosts);
+    let effective_max_concurrent_ports = max_concurrent_ports
+        .map(|value| value as usize)
+        .unwrap_or(safe_ports)
+        .min(safe_ports);
     let methods =
         discovery_methods.unwrap_or_else(|| vec!["arp".into(), "tcp_probe".into(), "icmp".into()]);
     let effective_retry_count = retry_count.unwrap_or(0);
@@ -228,8 +247,8 @@ pub async fn start_scan(
     send_log(
         "info",
         &format!(
-            "Scan started (methods: {:?}, max_hosts: {}, max_ports: {}, retries: {}, type: {:?}, timing: {:?})",
-            methods, effective_max_concurrent, effective_max_concurrent_ports, effective_retry_count, effective_scan_type, effective_timing
+            "Scan started (mode: {}, methods: {:?}, max_hosts: {}, max_ports: {}, retries: {}, type: {:?}, timing: {:?})",
+            effective_scan_mode, methods, effective_max_concurrent, effective_max_concurrent_ports, effective_retry_count, effective_scan_type, effective_timing
         ),
         None,
     );
@@ -286,11 +305,11 @@ pub async fn start_scan(
     });
 
     // Connect stages via bounded channels
-    let (target_tx, target_rx) = mpsc::channel(64);
-    let (discovery_tx, discovery_rx) = mpsc::channel(32);
-    let (port_tx, port_rx) = mpsc::channel(16);
-    let (enrich_tx, enrich_rx) = mpsc::channel(16);
-    let (finding_tx, finding_rx) = mpsc::channel(32);
+    let (target_tx, target_rx) = mpsc::channel(TARGET_CHANNEL_CAPACITY);
+    let (discovery_tx, discovery_rx) = mpsc::channel(DISCOVERY_CHANNEL_CAPACITY);
+    let (port_tx, port_rx) = mpsc::channel(PORT_CHANNEL_CAPACITY);
+    let (enrich_tx, enrich_rx) = mpsc::channel(ENRICH_CHANNEL_CAPACITY);
+    let (finding_tx, finding_rx) = mpsc::channel(FINDING_CHANNEL_CAPACITY);
 
     // Spawn Stage 1: Target Stream
     let ctx_c1 = ctx.clone();
@@ -329,7 +348,7 @@ pub async fn start_scan(
 
     // Spawn Stage 3: Port Scan
     let ctx_c3 = ctx.clone();
-    let ports_c = if scan_ports {
+    let ports_c = if scan_ports && !matches!(effective_scan_mode, ScanMode::DiscoveryOnly) {
         ports.clone()
     } else {
         Vec::new()
@@ -355,8 +374,13 @@ pub async fn start_scan(
 
     // Spawn Stage 4: Enrichment
     let ctx_c4 = ctx.clone();
-    let web_profile_c = web_audit_profile.clone();
-    let run_active_c = run_active_checks.unwrap_or(false);
+    let web_profile_c = if matches!(effective_scan_mode, ScanMode::FullAudit) {
+        web_audit_profile.clone()
+    } else {
+        None
+    };
+    let run_active_c =
+        run_active_checks.unwrap_or(false) && matches!(effective_scan_mode, ScanMode::FullAudit);
     pipeline.spawn(async move {
         if let Err(e) = crate::commands::scan_pipeline::stage_enrichment(
             ctx_c4,

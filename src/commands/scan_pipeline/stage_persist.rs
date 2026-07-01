@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-use super::context::{wait_if_paused, PipelineContext};
+use super::context::{emit_stage_lifecycle, wait_if_paused, PipelineContext};
 use crate::error::ScanError;
 use crate::events::AppEvent;
 use crate::scan_store::ScanSessionStatus;
@@ -25,6 +25,7 @@ pub async fn stage_persistence_ui(
         target: None,
         timestamp: chrono::Utc::now().timestamp(),
     });
+    emit_stage_lifecycle(ctx.as_ref(), "persist", "started");
 
     loop {
         tokio::select! {
@@ -145,6 +146,7 @@ pub async fn stage_persistence_ui(
         target: None,
         timestamp: chrono::Utc::now().timestamp(),
     });
+    emit_stage_lifecycle(ctx.as_ref(), "persist", final_status.as_str());
 
     // Reset scan state running flag
     ctx.state.set_running(false);

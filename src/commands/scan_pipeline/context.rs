@@ -35,3 +35,16 @@ pub async fn wait_if_paused(pause_rx: &mut watch::Receiver<bool>) {
         }
     }
 }
+
+/// Emit a bounded aggregate lifecycle event for a pipeline stage.
+///
+/// This intentionally avoids per-host emissions; callers should use it only for
+/// stage-level transitions or coarse summaries.
+pub fn emit_stage_lifecycle(ctx: &PipelineContext, stage: &str, status: &str) {
+    let _ = ctx.event_tx.send(AppEvent::HostLifecycle {
+        host: "aggregate".to_string(),
+        stage: stage.to_string(),
+        status: status.to_string(),
+        timestamp: chrono::Utc::now().timestamp(),
+    });
+}
