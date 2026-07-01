@@ -10,6 +10,7 @@
 //! - `subscription()`: streaming event bridge from backend
 //! - `run()`: application entry point
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::SinkExt;
@@ -99,6 +100,121 @@ pub enum GuidedScanProfile {
     StealthRawScan,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FindingStatus {
+    New,
+    AcceptedRisk,
+    FalsePositive,
+    Fixed,
+    NeedsReview,
+}
+
+impl FindingStatus {
+    pub fn all() -> &'static [FindingStatus] {
+        &[
+            FindingStatus::New,
+            FindingStatus::AcceptedRisk,
+            FindingStatus::FalsePositive,
+            FindingStatus::Fixed,
+            FindingStatus::NeedsReview,
+        ]
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            FindingStatus::New => "New",
+            FindingStatus::AcceptedRisk => "Accepted Risk",
+            FindingStatus::FalsePositive => "False Positive",
+            FindingStatus::Fixed => "Fixed",
+            FindingStatus::NeedsReview => "Needs Review",
+        }
+    }
+}
+
+impl std::fmt::Display for FindingStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.label())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceDetailTab {
+    Overview,
+    Ports,
+    Services,
+    Findings,
+    Tls,
+    Web,
+    History,
+}
+
+impl DeviceDetailTab {
+    pub fn all() -> &'static [DeviceDetailTab] {
+        &[
+            DeviceDetailTab::Overview,
+            DeviceDetailTab::Ports,
+            DeviceDetailTab::Services,
+            DeviceDetailTab::Findings,
+            DeviceDetailTab::Tls,
+            DeviceDetailTab::Web,
+            DeviceDetailTab::History,
+        ]
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            DeviceDetailTab::Overview => "Overview",
+            DeviceDetailTab::Ports => "Ports",
+            DeviceDetailTab::Services => "Services",
+            DeviceDetailTab::Findings => "Findings",
+            DeviceDetailTab::Tls => "TLS",
+            DeviceDetailTab::Web => "Web",
+            DeviceDetailTab::History => "History",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogSeverityFilter {
+    All,
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogSeverityFilter {
+    pub fn all() -> &'static [LogSeverityFilter] {
+        &[
+            LogSeverityFilter::All,
+            LogSeverityFilter::Info,
+            LogSeverityFilter::Warn,
+            LogSeverityFilter::Error,
+        ]
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            LogSeverityFilter::All => "All",
+            LogSeverityFilter::Info => "Info",
+            LogSeverityFilter::Warn => "Warn",
+            LogSeverityFilter::Error => "Error",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RiskOverview {
+    pub total_hosts: usize,
+    pub hosts_with_findings: usize,
+    pub critical: usize,
+    pub high: usize,
+    pub medium: usize,
+    pub low: usize,
+    pub frequent_ports: Vec<(u16, usize)>,
+    pub top_risky_hosts: Vec<(String, usize)>,
+    pub exposed_services: Vec<String>,
+}
+
 impl GuidedScanProfile {
     /// Human-readable label for the profile.
     pub fn label(&self) -> &'static str {
@@ -185,6 +301,25 @@ pub enum Message {
     FindingsReceived(Vec<Finding>),
     ScanStartResult(Result<String, String>),
     ScanStopResult(Result<(), String>),
+    FindingSeverityFilterChanged(String),
+    FindingHostFilterChanged(String),
+    FindingCategoryFilterChanged(String),
+    FindingOnlyExploitableToggled(bool),
+    FindingOnlyExternalLikeToggled(bool),
+    FindingSelected(Option<String>),
+    FindingStatusChanged(String, FindingStatus),
+    DeviceDetailTabSelected(DeviceDetailTab),
+    RescanSelectedHost(String),
+    ExportSelectedHost(String),
+    CopyHostIp(String),
+    OpenHostHttp(String, bool),
+    ToggleKnownDevice(String),
+    HostNoteChanged(String, String),
+    LogSeverityFilterChanged(LogSeverityFilter),
+    LogSearchChanged(String),
+    LogAutoScrollToggled(bool),
+    ExportLogs,
+    LogsExportCompleted(Result<bool, String>),
 
     // IPC
     IpcServerStopped(Result<(), String>),
@@ -339,6 +474,24 @@ pub struct NetSentinelApp {
     pub filtered_devices: Vec<Device>,
     pub theme_dark: bool,
 
+    // Milestone 3 UI-only findings/results state
+    pub risk_overview: RiskOverview,
+    pub finding_severity_filter: String,
+    pub finding_host_filter: String,
+    pub finding_category_filter: String,
+    pub finding_only_exploitable: bool,
+    pub finding_only_external_like: bool,
+    pub filtered_findings: Vec<Finding>,
+    pub selected_finding_id: Option<String>,
+    pub finding_statuses: HashMap<String, FindingStatus>,
+    pub device_detail_tab: DeviceDetailTab,
+    pub known_devices: HashMap<String, bool>,
+    pub host_notes: HashMap<String, String>,
+    pub log_severity_filter: LogSeverityFilter,
+    pub log_search: String,
+    pub log_auto_scroll: bool,
+    pub log_export_status: Option<String>,
+
     // Settings
     settings_profile: SettingsProfile,
     settings_profiles: Vec<SettingsProfile>,
@@ -424,6 +577,22 @@ impl NetSentinelApp {
             sort_direction: SortDirection::Asc,
             filtered_devices: Vec::new(),
             theme_dark: true,
+            risk_overview: RiskOverview::default(),
+            finding_severity_filter: "all".to_string(),
+            finding_host_filter: String::new(),
+            finding_category_filter: String::new(),
+            finding_only_exploitable: false,
+            finding_only_external_like: false,
+            filtered_findings: Vec::new(),
+            selected_finding_id: None,
+            finding_statuses: HashMap::new(),
+            device_detail_tab: DeviceDetailTab::Overview,
+            known_devices: HashMap::new(),
+            host_notes: HashMap::new(),
+            log_severity_filter: LogSeverityFilter::All,
+            log_search: String::new(),
+            log_auto_scroll: true,
+            log_export_status: None,
             settings_profile: SettingsProfile::default_profile(),
             settings_profiles: Vec::new(),
             history_entries: Vec::new(),
@@ -571,6 +740,122 @@ impl NetSentinelApp {
         self.filtered_devices = devices;
     }
 
+    pub fn update_filtered_findings(&mut self) {
+        let severity = self.finding_severity_filter.to_lowercase();
+        let host = self.finding_host_filter.to_lowercase();
+        let category = self.finding_category_filter.to_lowercase();
+        let only_exploitable = self.finding_only_exploitable;
+        let only_external_like = self.finding_only_external_like;
+
+        let mut findings = self.findings.clone();
+        findings.retain(|finding| {
+            let severity_ok =
+                severity == "all" || format!("{:?}", finding.severity).to_lowercase() == severity;
+            let host_ok = host.is_empty() || finding.ip.to_lowercase().contains(&host);
+            let category_ok = category.is_empty()
+                || format!("{:?}", finding.category)
+                    .to_lowercase()
+                    .contains(&category)
+                || finding.title.to_lowercase().contains(&category);
+            let exploitable_ok = !only_exploitable
+                || matches!(
+                    finding.severity,
+                    FindingSeverity::Critical | FindingSeverity::High
+                )
+                || finding.cve.is_some();
+            let external_like_ok = !only_external_like
+                || finding
+                    .port
+                    .map(|port| {
+                        matches!(
+                            port,
+                            21 | 22 | 23 | 25 | 80 | 443 | 3389 | 5900 | 8080 | 8443
+                        )
+                    })
+                    .unwrap_or(false);
+
+            severity_ok && host_ok && category_ok && exploitable_ok && external_like_ok
+        });
+        self.filtered_findings = findings;
+    }
+
+    fn refresh_risk_overview(&mut self) {
+        let mut port_counts: HashMap<u16, usize> = HashMap::new();
+        let mut services: Vec<String> = Vec::new();
+        let mut host_scores: Vec<(String, usize)> = Vec::new();
+        let mut overview = RiskOverview {
+            total_hosts: self.discovered_devices.len(),
+            hosts_with_findings: self
+                .discovered_devices
+                .iter()
+                .filter(|device| !device.findings.is_empty())
+                .count(),
+            critical: self.finding_counts.critical,
+            high: self.finding_counts.high,
+            medium: self.finding_counts.medium,
+            low: self.finding_counts.low,
+            frequent_ports: Vec::new(),
+            top_risky_hosts: Vec::new(),
+            exposed_services: Vec::new(),
+        };
+
+        for device in &self.discovered_devices {
+            let mut score = 0usize;
+            for port in &device.ports {
+                if port.state == crate::types::PortState::Open {
+                    *port_counts.entry(port.number).or_insert(0) += 1;
+                    if let Some(service) = port.service.as_ref() {
+                        if !services.iter().any(|item| item == service) {
+                            services.push(service.clone());
+                        }
+                    }
+                }
+            }
+            for finding in &device.findings {
+                score += match finding.severity {
+                    FindingSeverity::Critical => 5,
+                    FindingSeverity::High => 4,
+                    FindingSeverity::Medium => 2,
+                    FindingSeverity::Low | FindingSeverity::Info => 1,
+                };
+            }
+            if score > 0 {
+                host_scores.push((device.ip.clone(), score));
+            }
+        }
+
+        let mut ports: Vec<(u16, usize)> = port_counts.into_iter().collect();
+        ports.sort_by(|a, b| b.1.cmp(&a.1));
+        ports.truncate(5);
+        host_scores.sort_by(|a, b| b.1.cmp(&a.1));
+        host_scores.truncate(5);
+        services.sort();
+        services.truncate(8);
+
+        overview.frequent_ports = ports;
+        overview.top_risky_hosts = host_scores;
+        overview.exposed_services = services;
+        self.risk_overview = overview;
+    }
+
+    fn refresh_scan_ui_caches(&mut self) {
+        self.refresh_finding_counts();
+        self.refresh_risk_overview();
+        self.update_filtered_findings();
+    }
+
+    fn push_ui_log(&mut self, level: &str, message: String, target: Option<String>) {
+        self.scan_logs.push(ScanLogEntry {
+            level: level.to_string(),
+            message,
+            target,
+            timestamp: chrono::Utc::now().timestamp(),
+        });
+        if self.scan_logs.len() > 200 {
+            self.scan_logs.remove(0);
+        }
+    }
+
     fn attach_cached_findings_to_device(&self, device: &mut Device) {
         for finding in self
             .findings
@@ -621,41 +906,47 @@ impl NetSentinelApp {
         self.update_filtered_devices();
     }
 
-    fn merge_finding(&mut self, finding: Finding) {
-        if !self
-            .findings
-            .iter()
-            .any(|existing| existing.id == finding.id)
-        {
-            self.findings.push(finding.clone());
+    fn merge_findings(&mut self, findings: Vec<Finding>) {
+        if findings.is_empty() {
+            return;
         }
 
-        if let Some(device) = self
-            .discovered_devices
-            .iter_mut()
-            .find(|device| device.ip == finding.ip)
-        {
-            if !device
+        for finding in findings {
+            if !self
                 .findings
                 .iter()
                 .any(|existing| existing.id == finding.id)
             {
-                device.findings.push(finding.clone());
+                self.findings.push(finding.clone());
             }
-        }
 
-        if let Some(device) = self.selected_device.as_mut() {
-            if device.ip == finding.ip
-                && !device
+            if let Some(device) = self
+                .discovered_devices
+                .iter_mut()
+                .find(|device| device.ip == finding.ip)
+            {
+                if !device
                     .findings
                     .iter()
                     .any(|existing| existing.id == finding.id)
-            {
-                device.findings.push(finding);
+                {
+                    device.findings.push(finding.clone());
+                }
+            }
+
+            if let Some(device) = self.selected_device.as_mut() {
+                if device.ip == finding.ip
+                    && !device
+                        .findings
+                        .iter()
+                        .any(|existing| existing.id == finding.id)
+                {
+                    device.findings.push(finding);
+                }
             }
         }
 
-        self.refresh_finding_counts();
+        self.refresh_scan_ui_caches();
         self.update_filtered_devices();
     }
 
@@ -672,7 +963,7 @@ impl NetSentinelApp {
             }
         }
         self.findings = findings;
-        self.refresh_finding_counts();
+        self.refresh_scan_ui_caches();
     }
 
     fn refresh_finding_counts(&mut self) {
@@ -1039,6 +1330,9 @@ impl NetSentinelApp {
                 self.findings.clear();
                 self.selected_finding = None;
                 self.finding_counts = FindingCounts::default();
+                self.risk_overview = RiskOverview::default();
+                self.filtered_findings.clear();
+                self.selected_finding_id = None;
                 self.filtered_devices.clear();
                 self.scan_logs.clear();
                 self.selected_device = None;
@@ -1334,14 +1628,190 @@ impl NetSentinelApp {
             }
 
             Message::FindingReceived(finding) => {
-                self.merge_finding(finding);
+                self.merge_findings(vec![finding]);
                 Task::none()
             }
 
             Message::FindingsReceived(findings) => {
-                for finding in findings {
-                    self.merge_finding(finding);
+                self.merge_findings(findings);
+                Task::none()
+            }
+
+            Message::FindingSeverityFilterChanged(severity) => {
+                self.finding_severity_filter = severity;
+                self.update_filtered_findings();
+                Task::none()
+            }
+
+            Message::FindingHostFilterChanged(host) => {
+                self.finding_host_filter = host;
+                self.update_filtered_findings();
+                Task::none()
+            }
+
+            Message::FindingCategoryFilterChanged(category) => {
+                self.finding_category_filter = category;
+                self.update_filtered_findings();
+                Task::none()
+            }
+
+            Message::FindingOnlyExploitableToggled(value) => {
+                self.finding_only_exploitable = value;
+                self.update_filtered_findings();
+                Task::none()
+            }
+
+            Message::FindingOnlyExternalLikeToggled(value) => {
+                self.finding_only_external_like = value;
+                self.update_filtered_findings();
+                Task::none()
+            }
+
+            Message::FindingSelected(id) => {
+                self.selected_finding_id = id.clone();
+                self.selected_finding = id.and_then(|finding_id| {
+                    self.findings
+                        .iter()
+                        .find(|finding| finding.id == finding_id)
+                        .cloned()
+                });
+                Task::none()
+            }
+
+            Message::FindingStatusChanged(id, status) => {
+                self.finding_statuses.insert(id, status);
+                Task::none()
+            }
+
+            Message::DeviceDetailTabSelected(tab) => {
+                self.device_detail_tab = tab;
+                Task::none()
+            }
+
+            Message::RescanSelectedHost(ip) => {
+                self.push_ui_log(
+                    "warn",
+                    "Single-host rescan is not exposed by the current scan command; use CIDR /32 manually.".to_string(),
+                    Some(ip),
+                );
+                Task::none()
+            }
+
+            Message::ExportSelectedHost(ip) => {
+                let device = self
+                    .discovered_devices
+                    .iter()
+                    .find(|device| device.ip == ip)
+                    .cloned();
+                if let Some(device) = device {
+                    Task::perform(
+                        async move {
+                            if let Some(path) = rfd::AsyncFileDialog::new()
+                                .add_filter("JSON", &["json"])
+                                .set_file_name(format!(
+                                    "netsentinel_host_{}.json",
+                                    device.ip.replace('.', "_")
+                                ))
+                                .save_file()
+                                .await
+                            {
+                                let bytes = serde_json::to_vec_pretty(&device)
+                                    .map_err(|e| e.to_string())?;
+                                tokio::fs::write(path.path(), bytes)
+                                    .await
+                                    .map_err(|e| e.to_string())?;
+                                Ok(true)
+                            } else {
+                                Ok(false)
+                            }
+                        },
+                        Message::ExportCompleted,
+                    )
+                } else {
+                    self.status_message =
+                        Some("Host export failed: selected host not found".to_string());
+                    Task::none()
                 }
+            }
+
+            Message::CopyHostIp(ip) => {
+                self.status_message = Some(format!("Host IP: {}", ip));
+                Task::none()
+            }
+
+            Message::OpenHostHttp(ip, tls) => {
+                let scheme = if tls { "https" } else { "http" };
+                self.status_message = Some(format!("Open manually: {}://{}", scheme, ip));
+                Task::none()
+            }
+
+            Message::ToggleKnownDevice(ip) => {
+                let current = self.known_devices.get(&ip).copied().unwrap_or(false);
+                self.known_devices.insert(ip, !current);
+                Task::none()
+            }
+
+            Message::HostNoteChanged(ip, note) => {
+                self.host_notes.insert(ip, note);
+                Task::none()
+            }
+
+            Message::LogSeverityFilterChanged(filter) => {
+                self.log_severity_filter = filter;
+                Task::none()
+            }
+
+            Message::LogSearchChanged(search) => {
+                self.log_search = search;
+                Task::none()
+            }
+
+            Message::LogAutoScrollToggled(value) => {
+                self.log_auto_scroll = value;
+                Task::none()
+            }
+
+            Message::ExportLogs => {
+                let logs = self.scan_logs.clone();
+                Task::perform(
+                    async move {
+                        if let Some(path) = rfd::AsyncFileDialog::new()
+                            .add_filter("Text", &["txt"])
+                            .set_file_name("netsentinel_scan_logs.txt")
+                            .save_file()
+                            .await
+                        {
+                            let content = logs
+                                .iter()
+                                .map(|log| {
+                                    format!(
+                                        "[{}] [{}] [{}] {}",
+                                        log.timestamp,
+                                        log.level,
+                                        log.target.as_deref().unwrap_or("-"),
+                                        log.message
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            tokio::fs::write(path.path(), content)
+                                .await
+                                .map_err(|e| e.to_string())?;
+                            Ok(true)
+                        } else {
+                            Ok(false)
+                        }
+                    },
+                    Message::LogsExportCompleted,
+                )
+            }
+
+            Message::LogsExportCompleted(result) => {
+                self.log_export_status = Some(match result {
+                    Ok(true) => "Logs exported".to_string(),
+                    Ok(false) => "Log export cancelled".to_string(),
+                    Err(e) => format!("Log export failed: {}", e),
+                });
                 Task::none()
             }
 

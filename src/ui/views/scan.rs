@@ -10,7 +10,9 @@ use crate::scan_plan::ScanMode;
 use crate::types::ScanType;
 use crate::ui::theme::{self, DANGER, TEXT, TEXT_MUTED, WARNING};
 use crate::ui::widgets;
-use crate::ui::{GuidedScanProfile, Message, NetSentinelApp};
+use crate::ui::{
+    DeviceDetailTab, FindingStatus, GuidedScanProfile, LogSeverityFilter, Message, NetSentinelApp,
+};
 
 /// Render the Scan page.
 pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
@@ -186,29 +188,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         content = content.push(progress_card);
     }
 
-    if !app.findings.is_empty() {
-        let counts = &app.finding_counts;
-        let summary = row![
-            severity_count(
-                "Critical",
-                counts.critical,
-                crate::types::FindingSeverity::Critical
-            ),
-            severity_count("High", counts.high, crate::types::FindingSeverity::High),
-            severity_count(
-                "Medium",
-                counts.medium,
-                crate::types::FindingSeverity::Medium
-            ),
-            severity_count("Low", counts.low, crate::types::FindingSeverity::Low),
-            severity_count("Info", counts.info, crate::types::FindingSeverity::Info),
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center)
-        .width(Length::Fill);
-
-        content = content.push(widgets::card(Some("Findings Summary"), summary));
-    }
+    content = content.push(risk_overview_card(app));
 
     // ── Global Findings List ────────────────────────────────────────────
     if app.is_scanning || !app.findings.is_empty() {
@@ -226,39 +206,10 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
             .style(theme::empty_state_style)
             .into()
         } else {
-            let mut findings_list = column![].spacing(6);
-            for finding in &app.findings {
-                let target = finding
-                    .port
-                    .map(|port| format!("{}:{}", finding.ip, port))
-                    .unwrap_or_else(|| finding.ip.clone());
-                let evidence = finding
-                    .evidence
-                    .as_ref()
-                    .map(|evidence| format!(" - {}", truncate_chars(evidence, 60)))
-                    .unwrap_or_default();
-
-                findings_list = findings_list.push(
-                    column![
-                        row![
-                            widgets::finding_severity_badge(&finding.severity),
-                            text(&finding.title).color(TEXT).size(12),
-                        ]
-                        .spacing(8)
-                        .align_y(Alignment::Center),
-                        text(format!("{}{}", target, evidence))
-                            .color(TEXT_MUTED)
-                            .size(11),
-                    ]
-                    .spacing(4),
-                );
-            }
-            scrollable(findings_list)
-                .height(Length::Fixed(220.0))
-                .into()
+            findings_table(app)
         };
 
-        content = content.push(widgets::card(Some("Findings"), findings_content));
+        content = content.push(widgets::card(Some("Actionable Findings"), findings_content));
     }
 
     // ── Toolbar Header (Title, Exports) ─────────────────────────────────
@@ -547,106 +498,10 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
 
     // ── Device Detail Panel (Split view on right) ────────────────────────
     let results_block: iced::Element<'_, Message> = if let Some(ref device) = app.selected_device {
-        let mut detail_col = column![].spacing(16).width(Length::Fill);
-
-        detail_col = detail_col.push(
-            row![
-                text("Device Details").color(TEXT).size(18),
-                iced::widget::horizontal_space().width(Length::Fill),
-                button(text("✕").size(14).color(TEXT_MUTED))
-                    .padding([4, 8])
-                    .style(theme::secondary_button)
-                    .on_press(Message::DeviceSelected(None))
-            ]
-            .align_y(Alignment::Center),
-        );
-
-        let info_section = column![
-            widgets::info_row("IP Address:", device.ip.clone()),
-            widgets::info_row("MAC Address:", device.mac.clone()),
-            widgets::info_row(
-                "Hostname:",
-                device.hostname.clone().unwrap_or_else(|| "-".to_string()),
-            ),
-            widgets::info_row(
-                "Vendor:",
-                device.vendor.clone().unwrap_or_else(|| "-".to_string()),
-            ),
-            widgets::info_row("OS:", device.os.clone().unwrap_or_else(|| "-".to_string()),),
-            row![
-                text("Status:").color(TEXT_MUTED).size(13),
-                iced::widget::horizontal_space().width(Length::Fixed(10.0)),
-                widgets::status_badge(&format!("{:?}", device.status))
-            ]
-            .align_y(Alignment::Center)
-        ]
-        .spacing(10);
-
-        detail_col = detail_col.push(info_section);
-
-        // Ports list
-        if !device.ports.is_empty() {
-            detail_col = detail_col.push(text("Open Ports").color(TEXT).size(14));
-            let mut ports_col = column![].spacing(8);
-            for port in &device.ports {
-                let svc = port.service.as_deref();
-                let state_str = format!("{:?}", port.state);
-                ports_col = ports_col.push(widgets::port_badge(port.number, &state_str, svc));
-            }
-            detail_col = detail_col.push(scrollable(ports_col).height(Length::Fixed(140.0)));
-        }
-
-        // Banner results
-        if !device.banner_results.is_empty() {
-            detail_col = detail_col.push(text("Service Banners").color(TEXT).size(14));
-            let mut banners_col = column![].spacing(6);
-            for banner in &device.banner_results {
-                let banner_text = format!(
-                    "Port {}: {} ({})",
-                    banner.port,
-                    banner.service.as_deref().unwrap_or("unknown"),
-                    truncate_chars(&banner.banner, 80)
-                );
-                banners_col = banners_col.push(text(banner_text).color(TEXT_MUTED).size(12));
-            }
-            detail_col = detail_col.push(scrollable(banners_col).height(Length::Fixed(140.0)));
-        }
-
-        if !device.findings.is_empty() {
-            detail_col = detail_col.push(text("Findings").color(TEXT).size(14));
-            let mut findings_col = column![].spacing(8);
-            for finding in &device.findings {
-                let target = finding
-                    .port
-                    .map(|port| format!("{}:{}", finding.ip, port))
-                    .unwrap_or_else(|| finding.ip.clone());
-                let evidence = finding
-                    .evidence
-                    .as_ref()
-                    .map(|evidence| format!(" - {}", truncate_chars(evidence, 72)))
-                    .unwrap_or_default();
-
-                findings_col = findings_col.push(
-                    column![
-                        row![
-                            widgets::finding_severity_badge(&finding.severity),
-                            text(&finding.title).color(TEXT).size(12),
-                        ]
-                        .spacing(8)
-                        .align_y(Alignment::Center),
-                        text(format!("{}{}", target, evidence))
-                            .color(TEXT_MUTED)
-                            .size(11),
-                    ]
-                    .spacing(4),
-                );
-            }
-            detail_col = detail_col.push(scrollable(findings_col).height(Length::Fixed(180.0)));
-        }
-
-        let detail_card = container(detail_col)
-            .padding(20)
-            .width(Length::Fixed(340.0))
+        let detail_card = container(device_detail_panel(app, device))
+            .padding(16)
+            .width(Length::FillPortion(2))
+            .height(Length::Fill)
             .style(theme::card_style);
 
         row![left_card, detail_card]
@@ -666,12 +521,24 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     if app.scan_logs.is_empty() {
         logs_list = logs_list.push(text("No scan logs yet.").color(TEXT_MUTED).size(12));
     } else {
-        let start = if app.scan_logs.len() > 50 {
-            app.scan_logs.len() - 50
-        } else {
-            0
-        };
-        for log in &app.scan_logs[start..] {
+        let search = app.log_search.to_lowercase();
+        for log in &app.scan_logs {
+            let level_matches = match app.log_severity_filter {
+                LogSeverityFilter::All => true,
+                LogSeverityFilter::Info => log.level.eq_ignore_ascii_case("info"),
+                LogSeverityFilter::Warn => log.level.eq_ignore_ascii_case("warn"),
+                LogSeverityFilter::Error => log.level.eq_ignore_ascii_case("error"),
+            };
+            let search_matches = search.is_empty()
+                || log.message.to_lowercase().contains(&search)
+                || log
+                    .target
+                    .as_ref()
+                    .map(|target| target.to_lowercase().contains(&search))
+                    .unwrap_or(false);
+            if !level_matches || !search_matches {
+                continue;
+            }
             let level_color = match log.level.as_str() {
                 "error" => crate::ui::theme::DANGER,
                 "warn" => crate::ui::theme::WARNING,
@@ -679,7 +546,8 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
                 _ => TEXT_MUTED,
             };
             let log_text = format!(
-                "[{}] [{}] {}",
+                "[{}] [{}] [{}] {}",
+                format_timestamp(log.timestamp),
                 log.level.to_uppercase(),
                 log.target.as_deref().unwrap_or("-"),
                 log.message
@@ -690,10 +558,35 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
 
     let logs_card = container(
         column![
-            text("Scan Logs").color(TEXT).size(16).font(iced::Font {
-                weight: iced::font::Weight::Bold,
-                ..Default::default()
-            }),
+            row![
+                text("Scan Logs").color(TEXT).size(16).font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..Default::default()
+                }),
+                iced::widget::horizontal_space().width(Length::Fill),
+                log_filter_buttons(app),
+                button(text("Export").size(11))
+                    .padding([4, 8])
+                    .style(theme::secondary_button)
+                    .on_press(Message::ExportLogs),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+            row![
+                text_input("Search logs...", &app.log_search)
+                    .on_input(Message::LogSearchChanged)
+                    .padding(6)
+                    .size(12)
+                    .width(Length::Fill),
+                checkbox("Auto-scroll", app.log_auto_scroll)
+                    .on_toggle(Message::LogAutoScrollToggled)
+                    .size(14),
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center),
+            text(app.log_export_status.as_deref().unwrap_or(""))
+                .color(TEXT_MUTED)
+                .size(11),
             container(scrollable(logs_list).height(Length::Fixed(150.0)))
                 .padding(12)
                 .width(Length::Fill)
@@ -713,6 +606,578 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         .into()
 }
 
+fn risk_overview_card(app: &NetSentinelApp) -> iced::Element<'_, Message> {
+    let overview = &app.risk_overview;
+    let ports = if overview.frequent_ports.is_empty() {
+        "-".to_string()
+    } else {
+        overview
+            .frequent_ports
+            .iter()
+            .map(|(port, count)| format!("{} ({})", port, count))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let hosts = if overview.top_risky_hosts.is_empty() {
+        "-".to_string()
+    } else {
+        overview
+            .top_risky_hosts
+            .iter()
+            .map(|(ip, score)| format!("{} ({})", ip, score))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let services = if overview.exposed_services.is_empty() {
+        "-".to_string()
+    } else {
+        overview.exposed_services.join(", ")
+    };
+
+    widgets::card(
+        Some("Risk Overview"),
+        column![
+            row![
+                metric("Hosts", overview.total_hosts.to_string()),
+                metric(
+                    "Hosts w/ findings",
+                    overview.hosts_with_findings.to_string()
+                ),
+                metric("Critical", overview.critical.to_string()),
+                metric("High", overview.high.to_string()),
+                metric("Medium", overview.medium.to_string()),
+                metric("Low", overview.low.to_string()),
+            ]
+            .spacing(10),
+            row![
+                metric("Top ports", ports),
+                metric("Riskiest hosts", hosts),
+                metric("Exposed services", services),
+            ]
+            .spacing(10)
+        ]
+        .spacing(10),
+    )
+    .into()
+}
+
+fn metric<'a>(label: &'static str, value: String) -> iced::Element<'a, Message> {
+    container(
+        column![
+            text(label).color(TEXT_MUTED).size(10),
+            text(value).color(TEXT).size(13),
+        ]
+        .spacing(4),
+    )
+    .padding(10)
+    .width(Length::Fill)
+    .style(theme::table_container_style)
+    .into()
+}
+
+fn findings_table(app: &NetSentinelApp) -> iced::Element<'_, Message> {
+    let severity_filter = row![
+        severity_filter_button("all", "All", app),
+        severity_filter_button("critical", "Critical", app),
+        severity_filter_button("high", "High", app),
+        severity_filter_button("medium", "Medium", app),
+        severity_filter_button("low", "Low", app),
+    ]
+    .spacing(4);
+
+    let filters = row![
+        column![text("Severity").color(TEXT_MUTED).size(10), severity_filter]
+            .spacing(3)
+            .width(Length::Shrink),
+        column![
+            text("Host").color(TEXT_MUTED).size(10),
+            text_input("IP / host", &app.finding_host_filter)
+                .on_input(Message::FindingHostFilterChanged)
+                .padding(6)
+                .size(12)
+        ]
+        .spacing(3)
+        .width(Length::FillPortion(1)),
+        column![
+            text("Category").color(TEXT_MUTED).size(10),
+            text_input("category", &app.finding_category_filter)
+                .on_input(Message::FindingCategoryFilterChanged)
+                .padding(6)
+                .size(12)
+        ]
+        .spacing(3)
+        .width(Length::FillPortion(1)),
+        checkbox("Exploitable", app.finding_only_exploitable)
+            .on_toggle(Message::FindingOnlyExploitableToggled)
+            .size(14),
+        checkbox("External-like", app.finding_only_external_like)
+            .on_toggle(Message::FindingOnlyExternalLikeToggled)
+            .size(14),
+    ]
+    .spacing(12)
+    .align_y(Alignment::Center);
+
+    let header = row![
+        text("Severity")
+            .color(TEXT_MUTED)
+            .size(10)
+            .width(Length::FillPortion(1)),
+        text("Host")
+            .color(TEXT_MUTED)
+            .size(10)
+            .width(Length::FillPortion(1)),
+        text("Port")
+            .color(TEXT_MUTED)
+            .size(10)
+            .width(Length::FillPortion(1)),
+        text("Service")
+            .color(TEXT_MUTED)
+            .size(10)
+            .width(Length::FillPortion(1)),
+        text("Category")
+            .color(TEXT_MUTED)
+            .size(10)
+            .width(Length::FillPortion(1)),
+        text("Confidence")
+            .color(TEXT_MUTED)
+            .size(10)
+            .width(Length::FillPortion(1)),
+        text("Evidence")
+            .color(TEXT_MUTED)
+            .size(10)
+            .width(Length::FillPortion(2)),
+        text("Recommendation")
+            .color(TEXT_MUTED)
+            .size(10)
+            .width(Length::FillPortion(2)),
+    ]
+    .spacing(8)
+    .padding([4, 8]);
+
+    let mut rows = column![header].spacing(4);
+    for finding in &app.filtered_findings {
+        let selected = app
+            .selected_finding_id
+            .as_ref()
+            .map(|id| id == &finding.id)
+            .unwrap_or(false);
+        let row_content = row![
+            widgets::finding_severity_badge(&finding.severity).width(Length::FillPortion(1)),
+            text(&finding.ip)
+                .color(TEXT)
+                .size(11)
+                .width(Length::FillPortion(1)),
+            text(
+                finding
+                    .port
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| "-".to_string())
+            )
+            .color(TEXT_MUTED)
+            .size(11)
+            .width(Length::FillPortion(1)),
+            text(finding.service.as_deref().unwrap_or("-"))
+                .color(TEXT_MUTED)
+                .size(11)
+                .width(Length::FillPortion(1)),
+            text(format!("{:?}", finding.category))
+                .color(TEXT_MUTED)
+                .size(11)
+                .width(Length::FillPortion(1)),
+            text(format!("{:?}", finding.confidence))
+                .color(TEXT_MUTED)
+                .size(11)
+                .width(Length::FillPortion(1)),
+            text(
+                finding
+                    .evidence
+                    .as_deref()
+                    .map(|e| truncate_chars(e, 64))
+                    .unwrap_or_else(|| "-".to_string())
+            )
+            .color(TEXT_MUTED)
+            .size(11)
+            .width(Length::FillPortion(2)),
+            text(
+                finding
+                    .remediation
+                    .as_deref()
+                    .map(|r| truncate_chars(r, 64))
+                    .unwrap_or_else(|| "Review finding".to_string())
+            )
+            .color(TEXT_MUTED)
+            .size(11)
+            .width(Length::FillPortion(2)),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .padding([6, 8]);
+        rows = rows.push(
+            button(row_content)
+                .style(row_button_style(selected))
+                .on_press(Message::FindingSelected(Some(finding.id.clone()))),
+        );
+    }
+
+    let detail = app
+        .selected_finding
+        .as_ref()
+        .map(|finding| finding_detail(app, finding));
+
+    let mut layout = column![filters, scrollable(rows).height(Length::Fixed(230.0))].spacing(10);
+    if let Some(detail) = detail {
+        layout = layout.push(detail);
+    }
+    layout.into()
+}
+
+fn severity_filter_button<'a>(
+    value: &'static str,
+    label: &'static str,
+    app: &NetSentinelApp,
+) -> iced::Element<'a, Message> {
+    let active = app.finding_severity_filter == value;
+    button(text(label).size(10))
+        .padding([4, 8])
+        .style(if active {
+            theme::primary_button
+        } else {
+            theme::secondary_button
+        })
+        .on_press(Message::FindingSeverityFilterChanged(value.to_string()))
+        .into()
+}
+
+fn finding_detail<'a>(
+    app: &NetSentinelApp,
+    finding: &'a crate::types::Finding,
+) -> iced::Element<'a, Message> {
+    let status = app
+        .finding_statuses
+        .get(&finding.id)
+        .copied()
+        .unwrap_or(FindingStatus::New);
+    let mut status_row = row![text("Status:").color(TEXT_MUTED).size(12)].spacing(6);
+    for item in FindingStatus::all() {
+        status_row = status_row.push(
+            button(text(item.label()).size(10))
+                .padding([4, 8])
+                .style(if *item == status {
+                    theme::primary_button
+                } else {
+                    theme::secondary_button
+                })
+                .on_press(Message::FindingStatusChanged(finding.id.clone(), *item)),
+        );
+    }
+
+    container(
+        column![
+            row![
+                widgets::finding_severity_badge(&finding.severity),
+                text(&finding.title).color(TEXT).size(14)
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+            text(&finding.description).color(TEXT_MUTED).size(12),
+            widgets::info_row(
+                "Evidence:",
+                finding.evidence.clone().unwrap_or_else(|| "-".to_string())
+            ),
+            widgets::info_row(
+                "Risk:",
+                format!("{:?} / {:?}", finding.severity, finding.confidence)
+            ),
+            widgets::info_row(
+                "Recommendation:",
+                finding
+                    .remediation
+                    .clone()
+                    .unwrap_or_else(|| "Review and remediate according to policy.".to_string())
+            ),
+            widgets::info_row(
+                "CVE:",
+                finding
+                    .cve
+                    .as_ref()
+                    .map(|cve| cve.cve_id.clone())
+                    .unwrap_or_else(|| "-".to_string())
+            ),
+            status_row,
+        ]
+        .spacing(8),
+    )
+    .padding(12)
+    .style(theme::table_container_style)
+    .into()
+}
+
+fn device_detail_panel<'a>(
+    app: &NetSentinelApp,
+    device: &'a crate::types::Device,
+) -> iced::Element<'a, Message> {
+    let known = app.known_devices.get(&device.ip).copied().unwrap_or(false);
+    let note = app
+        .host_notes
+        .get(&device.ip)
+        .map(String::as_str)
+        .unwrap_or("");
+    let mut tabs = row![].spacing(4);
+    for tab in DeviceDetailTab::all() {
+        tabs = tabs.push(
+            button(text(tab.label()).size(10))
+                .padding([4, 8])
+                .style(if *tab == app.device_detail_tab {
+                    theme::primary_button
+                } else {
+                    theme::secondary_button
+                })
+                .on_press(Message::DeviceDetailTabSelected(*tab)),
+        );
+    }
+
+    let body = match app.device_detail_tab {
+        DeviceDetailTab::Overview => overview_tab(app, device, note),
+        DeviceDetailTab::Ports => ports_tab(device),
+        DeviceDetailTab::Services => services_tab(device),
+        DeviceDetailTab::Findings => host_findings_tab(device),
+        DeviceDetailTab::Tls => tls_tab(device),
+        DeviceDetailTab::Web => web_tab(device),
+        DeviceDetailTab::History => history_tab(device, known),
+    };
+
+    column![
+        row![
+            text(format!("Device {}", device.ip)).color(TEXT).size(16),
+            iced::widget::horizontal_space().width(Length::Fill),
+            button(text("✕").size(14).color(TEXT_MUTED))
+                .padding([4, 8])
+                .style(theme::secondary_button)
+                .on_press(Message::DeviceSelected(None)),
+        ]
+        .align_y(Alignment::Center),
+        row![
+            button(text("Re-scan").size(10))
+                .padding([4, 8])
+                .style(theme::secondary_button)
+                .on_press(Message::RescanSelectedHost(device.ip.clone())),
+            button(text("Export").size(10))
+                .padding([4, 8])
+                .style(theme::secondary_button)
+                .on_press(Message::ExportSelectedHost(device.ip.clone())),
+            button(text("Copy IP").size(10))
+                .padding([4, 8])
+                .style(theme::secondary_button)
+                .on_press(Message::CopyHostIp(device.ip.clone())),
+            button(text("HTTP").size(10))
+                .padding([4, 8])
+                .style(theme::secondary_button)
+                .on_press(Message::OpenHostHttp(device.ip.clone(), false)),
+            button(text("HTTPS").size(10))
+                .padding([4, 8])
+                .style(theme::secondary_button)
+                .on_press(Message::OpenHostHttp(device.ip.clone(), true)),
+            button(text(if known { "Known" } else { "Mark known" }).size(10))
+                .padding([4, 8])
+                .style(if known {
+                    theme::success_button
+                } else {
+                    theme::secondary_button
+                })
+                .on_press(Message::ToggleKnownDevice(device.ip.clone())),
+        ]
+        .spacing(4),
+        tabs,
+        scrollable(body).height(Length::Fill),
+    ]
+    .spacing(12)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+fn overview_tab<'a>(
+    app: &NetSentinelApp,
+    device: &'a crate::types::Device,
+    note: &str,
+) -> iced::Element<'a, Message> {
+    column![
+        widgets::info_row("IP Address:", device.ip.clone()),
+        widgets::info_row("MAC Address:", device.mac.clone()),
+        widgets::info_row(
+            "Hostname:",
+            device.hostname.clone().unwrap_or_else(|| "-".to_string())
+        ),
+        widgets::info_row(
+            "Vendor:",
+            device.vendor.clone().unwrap_or_else(|| "-".to_string())
+        ),
+        widgets::info_row("OS:", device.os.clone().unwrap_or_else(|| "-".to_string())),
+        row![
+            text("Status:").color(TEXT_MUTED).size(13),
+            widgets::status_badge(&format!("{:?}", device.status))
+        ]
+        .spacing(10),
+        text_input("Host note...", note)
+            .on_input({
+                let ip = device.ip.clone();
+                move |value| Message::HostNoteChanged(ip.clone(), value)
+            })
+            .padding(8)
+            .size(12),
+        text(format!(
+            "Known device: {}",
+            app.known_devices.get(&device.ip).copied().unwrap_or(false)
+        ))
+        .color(TEXT_MUTED)
+        .size(11),
+    ]
+    .spacing(10)
+    .into()
+}
+
+fn ports_tab<'a>(device: &'a crate::types::Device) -> iced::Element<'a, Message> {
+    let mut col = column![].spacing(8);
+    for port in &device.ports {
+        col = col.push(widgets::port_badge(
+            port.number,
+            &format!("{:?}", port.state),
+            port.service.as_deref(),
+        ));
+    }
+    if device.ports.is_empty() {
+        col = col.push(text("No ports recorded.").color(TEXT_MUTED).size(12));
+    }
+    col.into()
+}
+
+fn services_tab<'a>(device: &'a crate::types::Device) -> iced::Element<'a, Message> {
+    let mut col = column![].spacing(8);
+    for banner in &device.banner_results {
+        col = col.push(
+            text(format!(
+                "Port {}: {} — {}",
+                banner.port,
+                banner.service.as_deref().unwrap_or("unknown"),
+                truncate_chars(&banner.banner, 96)
+            ))
+            .color(TEXT_MUTED)
+            .size(12),
+        );
+    }
+    if device.banner_results.is_empty() {
+        col = col.push(
+            text("No service banners recorded.")
+                .color(TEXT_MUTED)
+                .size(12),
+        );
+    }
+    col.into()
+}
+
+fn host_findings_tab<'a>(device: &'a crate::types::Device) -> iced::Element<'a, Message> {
+    let mut col = column![].spacing(8);
+    for finding in &device.findings {
+        col = col.push(
+            row![
+                widgets::finding_severity_badge(&finding.severity),
+                text(&finding.title).color(TEXT).size(12)
+            ]
+            .spacing(8),
+        );
+        col = col.push(
+            text(
+                finding
+                    .evidence
+                    .as_deref()
+                    .unwrap_or("No evidence recorded"),
+            )
+            .color(TEXT_MUTED)
+            .size(11),
+        );
+    }
+    if device.findings.is_empty() {
+        col = col.push(
+            text("No findings for this host.")
+                .color(TEXT_MUTED)
+                .size(12),
+        );
+    }
+    col.into()
+}
+
+fn tls_tab<'a>(device: &'a crate::types::Device) -> iced::Element<'a, Message> {
+    let mut col = column![].spacing(8);
+    let mut has_tls = false;
+    for banner in &device.banner_results {
+        if banner.tls_info.is_some() {
+            has_tls = true;
+            col = col.push(
+                text(format!("TLS observed on port {}", banner.port))
+                    .color(TEXT_MUTED)
+                    .size(12),
+            );
+        }
+    }
+    if !has_tls {
+        col = col.push(text("No TLS details recorded.").color(TEXT_MUTED).size(12));
+    }
+    col.into()
+}
+
+fn web_tab<'a>(device: &'a crate::types::Device) -> iced::Element<'a, Message> {
+    let mut col = column![].spacing(8);
+    for audit in &device.web_audits {
+        col = col.push(
+            text(format!(
+                "{} — status {} — {} exposed path(s)",
+                audit.url,
+                audit.status_code,
+                audit.exposed_directories.len()
+            ))
+            .color(TEXT_MUTED)
+            .size(12),
+        );
+    }
+    if device.web_audits.is_empty() {
+        col = col.push(
+            text("No web audit results recorded.")
+                .color(TEXT_MUTED)
+                .size(12),
+        );
+    }
+    col.into()
+}
+
+fn history_tab<'a>(device: &'a crate::types::Device, known: bool) -> iced::Element<'a, Message> {
+    column![
+        widgets::info_row("Last seen:", format_timestamp(device.last_seen)),
+        widgets::info_row("Known device:", known.to_string()),
+        text("Persistent per-host history is not enabled for this milestone.")
+            .color(TEXT_MUTED)
+            .size(12),
+    ]
+    .spacing(8)
+    .into()
+}
+
+fn log_filter_buttons(app: &NetSentinelApp) -> iced::Element<'_, Message> {
+    let mut row = row![].spacing(4);
+    for filter in LogSeverityFilter::all() {
+        row = row.push(
+            button(text(filter.label()).size(10))
+                .padding([4, 8])
+                .style(if *filter == app.log_severity_filter {
+                    theme::primary_button
+                } else {
+                    theme::secondary_button
+                })
+                .on_press(Message::LogSeverityFilterChanged(*filter)),
+        );
+    }
+    row.into()
+}
+
 /// Format a Unix timestamp into a human-readable time string.
 fn format_timestamp(ts: i64) -> String {
     let dt = chrono::DateTime::from_timestamp(ts, 0);
@@ -728,22 +1193,6 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
         truncated.push_str("...");
     }
     truncated
-}
-
-fn severity_count<'a>(
-    label: &'static str,
-    count: usize,
-    severity: crate::types::FindingSeverity,
-) -> iced::Element<'a, Message> {
-    row![
-        widgets::finding_severity_badge(&severity),
-        text(format!("{} {}", count, label))
-            .color(TEXT_MUTED)
-            .size(12),
-    ]
-    .spacing(6)
-    .align_y(Alignment::Center)
-    .into()
 }
 
 /// Helper function to style table rows as clickable buttons
