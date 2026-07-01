@@ -1,11 +1,73 @@
 //! Dashboard view — system overview, network info, CVE summary, device list.
 
-use iced::widget::{column, container, row, scrollable, text};
+use iced::widget::{button, column, container, row, scrollable, text};
 use iced::{Alignment, Length};
 
 use crate::ui::theme::{self, TEXT, TEXT_MUTED};
 use crate::ui::widgets;
-use crate::ui::{Message, NetSentinelApp};
+use crate::ui::{GuidedScanProfile, Message, NetSentinelApp};
+
+/// Render the first-use Quick Start card shown on the Dashboard.
+fn quick_start_card(app: &NetSentinelApp) -> iced::Element<'_, Message> {
+    let mut info_col = column![].spacing(6);
+
+    if let Some(ref net) = app.network_info {
+        if !net.network_name.is_empty() && net.network_name != "Unknown" {
+            info_col = info_col.push(widgets::info_row("Interface:", net.network_name.clone()));
+        }
+        if !net.ip_address.is_empty() && net.ip_address != "Unknown" {
+            let network = crate::ui::calculate_cidr(&net.ip_address);
+            info_col = info_col.push(widgets::info_row("Local IP:", net.ip_address.clone()));
+            info_col = info_col.push(widgets::info_row("Local Network:", network));
+        }
+    }
+
+    if let Some(ref caps) = app.platform_caps {
+        let privilege_text = if caps.is_elevated {
+            "Elevated (raw sockets available)".to_string()
+        } else {
+            "Standard user (some scans will be limited)".to_string()
+        };
+        info_col = info_col.push(widgets::info_row("Permissions:", privilege_text));
+    }
+
+    let scan_btn = button(text("Scan current network").color(TEXT).size(13))
+        .padding([8, 16])
+        .style(theme::primary_button)
+        .on_press(Message::QuickStartScanCurrentNetwork);
+
+    let advanced_btn = button(text("Advanced scan").color(TEXT).size(13))
+        .padding([8, 16])
+        .style(theme::secondary_button)
+        .on_press(Message::QuickStartAdvancedScan);
+
+    let mut profile_row = row![text("Guided:").color(TEXT_MUTED).size(12)]
+        .spacing(6)
+        .align_y(Alignment::Center);
+    for profile in GuidedScanProfile::all() {
+        profile_row = profile_row.push(
+            button(text(profile.label()).size(11).color(TEXT))
+                .padding([4, 8])
+                .style(theme::secondary_button)
+                .on_press(Message::ApplyGuidedProfile(*profile)),
+        );
+    }
+
+    let content = column![
+        text("Welcome to NetSentinel").color(TEXT).size(16),
+        text("Start by scanning your local network or choose a guided profile.")
+            .color(TEXT_MUTED)
+            .size(13),
+        info_col,
+        row![scan_btn, advanced_btn]
+            .spacing(12)
+            .align_y(Alignment::Center),
+        profile_row,
+    ]
+    .spacing(12);
+
+    widgets::card(Some("Quick Start"), content).into()
+}
 
 /// Render the Dashboard page.
 pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
@@ -125,6 +187,11 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         .width(Length::Fill);
 
     content = content.push(info_row);
+
+    // ── Quick Start Card (first use) ────────────────────────────────────
+    if app.history_entries.is_empty() && !app.is_scanning {
+        content = content.push(quick_start_card(app));
+    }
 
     // ── Discovered Devices Card ─────────────────────────────────────────
     let device_count = app.discovered_devices.len();

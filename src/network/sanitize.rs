@@ -228,6 +228,122 @@ pub fn validate_concurrency(value: usize) -> Result<usize, ScanError> {
     Ok(value)
 }
 
+/// Parse a port expression into a sorted, deduplicated list of ports.
+///
+/// Supported syntax:
+/// - Comma-separated ports: `22,80,443`
+/// - Ranges: `22-100`, `1000-2000`
+/// - Presets (case-insensitive): `top-100`, `top100`, `top-1000`, `top1000`,
+///   `top-10000`, `top10000`
+/// - Mixed: `22,80,443,1000-2000,top-100`
+///
+/// Duplicate ports are removed and reported via the returned `Option<String>`
+/// warning. Port 0 is rejected.
+pub fn parse_port_expression(input: &str) -> Result<(Vec<u16>, Option<String>), ScanError> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Ok((Vec::new(), None));
+    }
+
+    let mut ports = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut duplicates = Vec::new();
+
+    for token in trimmed.split(',') {
+        let token = token.trim();
+        if token.is_empty() {
+            continue;
+        }
+
+        let lower = token.to_lowercase();
+        let preset_ports = match lower.as_str() {
+            "top-100" | "top100" => Some(top_100_ports()),
+            "top-1000" | "top1000" => Some(top_1000_ports()),
+            "top-10000" | "top10000" => Some(top_10000_ports()),
+            _ => None,
+        };
+
+        if let Some(preset_ports) = preset_ports {
+            for port in preset_ports {
+                if !seen.insert(port) {
+                    duplicates.push(port);
+                } else {
+                    ports.push(port);
+                }
+            }
+        } else if let Some((start, end)) = token.split_once('-') {
+            let start = start.trim().parse::<u16>().map_err(|_| {
+                ScanError::InvalidPort(format!("Invalid port range start in '{}'", token))
+            })?;
+            let end = end.trim().parse::<u16>().map_err(|_| {
+                ScanError::InvalidPort(format!("Invalid port range end in '{}'", token))
+            })?;
+
+            if start == 0 || end == 0 {
+                return Err(ScanError::InvalidPort(
+                    "Port 0 is not allowed in port ranges".to_string(),
+                ));
+            }
+            if start > end {
+                return Err(ScanError::InvalidPort(format!(
+                    "Invalid port range '{}': start is greater than end",
+                    token
+                )));
+            }
+
+            for port in start..=end {
+                if !seen.insert(port) {
+                    duplicates.push(port);
+                } else {
+                    ports.push(port);
+                }
+            }
+        } else {
+            let port = token
+                .parse::<u16>()
+                .map_err(|_| ScanError::InvalidPort(format!("Invalid port number '{}'", token)))?;
+            if port == 0 {
+                return Err(ScanError::InvalidPort("Port 0 is not allowed".to_string()));
+            }
+            if !seen.insert(port) {
+                duplicates.push(port);
+            } else {
+                ports.push(port);
+            }
+        }
+    }
+
+    let warning = if duplicates.is_empty() {
+        None
+    } else {
+        duplicates.sort_unstable();
+        duplicates.dedup();
+        Some(format!(
+            "Duplicate ports removed: {}",
+            duplicates
+                .iter()
+                .map(|p| p.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+    };
+
+    ports.sort_unstable();
+    Ok((ports, warning))
+}
+
+fn top_100_ports() -> Vec<u16> {
+    (1..=100).collect()
+}
+
+fn top_1000_ports() -> Vec<u16> {
+    (1..=1000).collect()
+}
+
+fn top_10000_ports() -> Vec<u16> {
+    (1..=10000).collect()
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -396,5 +512,81 @@ mod tests {
     #[test]
     fn test_validate_concurrency_too_large() {
         assert!(validate_concurrency(10_001).is_err());
+    }
+
+    // -- Port expression parser tests --
+
+    #[test]
+    fn test_parse_port_expression_comma_list() {
+        let (ports, warning) = parse_port_expression("22,80,443").unwrap();
+        assert_eq!(ports, vec![22, 80, 443]);
+        assert!(warning.is_none());
+    }
+
+    #[test]
+    fn test_parse_port_expression_range() {
+        let (ports, warning) = parse_port_expression("22-25").unwrap();
+        assert_eq!(ports, vec![22, 23, 24, 25]);
+        assert!(warning.is_none());
+    }
+
+    #[test]
+    fn test_parse_port_expression_presets() {
+        let (ports, warning) = parse_port_expression("top100").unwrap();
+        assert_eq!(ports.len(), 100);
+        assert_eq!(ports[0], 1);
+        assert_eq!(ports[99], 100);
+        assert!(warning.is_none());
+
+        let (ports, warning) = parse_port_expression("top-1000").unwrap();
+        assert_eq!(ports.len(), 1000);
+        assert!(warning.is_none());
+
+        let (ports, warning) = parse_port_expression("TOP10000").unwrap();
+        assert_eq!(ports.len(), 10000);
+        assert!(warning.is_none());
+    }
+
+    #[test]
+    fn test_parse_port_expression_mixed() {
+        let (ports, warning) = parse_port_expression("5000,6000,7000-7002,top-100").unwrap();
+        let mut expected: Vec<u16> = (1..=100).collect();
+        expected.extend_from_slice(&[5000, 6000, 7000, 7001, 7002]);
+        assert_eq!(ports, expected);
+        assert!(warning.is_none());
+    }
+
+    #[test]
+    fn test_parse_port_expression_duplicates_warn() {
+        let (ports, warning) = parse_port_expression("80,80,443,443").unwrap();
+        assert_eq!(ports, vec![80, 443]);
+        assert!(warning.is_some());
+        assert!(warning.unwrap().contains("Duplicate ports removed"));
+    }
+
+    #[test]
+    fn test_parse_port_expression_invalid_port() {
+        assert!(parse_port_expression("abc").is_err());
+        assert!(parse_port_expression("70000").is_err());
+    }
+
+    #[test]
+    fn test_parse_port_expression_zero_rejected() {
+        assert!(parse_port_expression("0").is_err());
+        assert!(parse_port_expression("0-10").is_err());
+        assert!(parse_port_expression("10-0").is_err());
+    }
+
+    #[test]
+    fn test_parse_port_expression_invalid_range() {
+        assert!(parse_port_expression("10-5").is_err());
+        assert!(parse_port_expression("abc-def").is_err());
+    }
+
+    #[test]
+    fn test_parse_port_expression_empty() {
+        let (ports, warning) = parse_port_expression("").unwrap();
+        assert!(ports.is_empty());
+        assert!(warning.is_none());
     }
 }

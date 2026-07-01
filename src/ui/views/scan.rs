@@ -7,9 +7,9 @@ use iced::widget::{
 use iced::{Alignment, Length};
 
 use crate::types::ScanType;
-use crate::ui::theme::{self, TEXT, TEXT_MUTED};
+use crate::ui::theme::{self, DANGER, TEXT, TEXT_MUTED, WARNING};
 use crate::ui::widgets;
-use crate::ui::{Message, NetSentinelApp};
+use crate::ui::{GuidedScanProfile, Message, NetSentinelApp};
 
 /// Render the Scan page.
 pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
@@ -24,13 +24,43 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         .padding(10)
         .size(14);
 
+    let cidr_error = app
+        .scan_cidr_error
+        .as_ref()
+        .map(|err| text(err).color(DANGER).size(11))
+        .unwrap_or_else(|| text("").size(11));
+
+    let cidr_col = column![
+        text("Target Network (CIDR)").color(TEXT_MUTED).size(12),
+        cidr_input,
+        cidr_error,
+    ]
+    .spacing(6)
+    .width(Length::FillPortion(3));
+
     let ports_input = text_input(
-        "Ports (comma-separated, e.g. 22,80,443)",
+        "Ports (comma-separated, ranges, presets, e.g. 22,80,443 or 22-100 or top-1000)",
         &app.scan_ports_str,
     )
     .on_input(Message::ScanPortsChanged)
     .padding(10)
     .size(14);
+
+    let ports_feedback: iced::Element<'_, Message> = if let Some(ref err) = app.scan_ports_error {
+        text(err).color(DANGER).size(11).into()
+    } else if let Some(ref warning) = app.scan_ports_warning {
+        text(warning).color(WARNING).size(11).into()
+    } else {
+        text("").size(11).into()
+    };
+
+    let ports_col = column![
+        text("Target Ports").color(TEXT_MUTED).size(12),
+        ports_input,
+        ports_feedback,
+    ]
+    .spacing(6)
+    .width(Length::FillPortion(3));
 
     let scan_type_picker = pick_list(
         &ScanType::all_types()[..],
@@ -45,7 +75,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         button(row![text("Start Scan").color(TEXT).size(15)].align_y(Alignment::Center))
             .padding([10, 24])
             .style(theme::primary_button)
-            .on_press(Message::StartScan);
+            .on_press(Message::StartScanRequested);
 
     let stop_btn = button(text("Stop Scan").color(TEXT).size(15))
         .padding([10, 24])
@@ -73,15 +103,8 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     }
 
     let config_row = row![
-        column![
-            text("Target Network (CIDR)").color(TEXT_MUTED).size(12),
-            cidr_input,
-        ]
-        .spacing(6)
-        .width(Length::FillPortion(3)),
-        column![text("Target Ports").color(TEXT_MUTED).size(12), ports_input,]
-            .spacing(6)
-            .width(Length::FillPortion(3)),
+        cidr_col,
+        ports_col,
         column![
             text("Scan Type").color(TEXT_MUTED).size(12),
             scan_type_picker,
@@ -104,6 +127,22 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     );
 
     content = content.push(config_card);
+
+    // ── Guided Scan Profiles ────────────────────────────────────────────
+    if !app.is_scanning {
+        let mut profile_row = row![text("Guided profile:").color(TEXT_MUTED).size(12)]
+            .spacing(8)
+            .align_y(Alignment::Center);
+        for profile in GuidedScanProfile::all() {
+            profile_row = profile_row.push(
+                button(text(profile.label()).size(11).color(TEXT))
+                    .padding([6, 12])
+                    .style(theme::secondary_button)
+                    .on_press(Message::ApplyGuidedProfile(*profile)),
+            );
+        }
+        content = content.push(widgets::card(Some("Guided Profiles"), profile_row));
+    }
 
     // ── Progress Section ────────────────────────────────────────────────
     if app.is_scanning {

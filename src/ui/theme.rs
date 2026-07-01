@@ -486,3 +486,30 @@ pub fn empty_state_style(_theme: &Theme) -> iced::widget::container::Style {
         ..Default::default()
     }
 }
+
+/// Style for modal overlay backdrop (semi-transparent dark background)
+pub fn modal_overlay_style(_theme: &Theme) -> iced::widget::container::Style {
+    iced::widget::container::Style {
+        background: Some(iced::Background::Color(Color {
+            r: BG.r,
+            g: BG.g,
+            b: BG.b,
+            a: 0.75,
+        })),
+        ..Default::default()
+    }
+}
+
+/// Style for modal card container
+pub fn modal_card_style(_theme: &Theme) -> iced::widget::container::Style {
+    iced::widget::container::Style {
+        background: Some(iced::Background::Color(SURFACE)),
+        border: Border {
+            radius: 10.0.into(),
+            width: 1.0,
+            color: BORDER_COLOR,
+        },
+        text_color: Some(TEXT),
+        ..Default::default()
+    }
+}

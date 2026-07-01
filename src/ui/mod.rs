@@ -13,7 +13,7 @@
 use std::sync::Arc;
 
 use futures::SinkExt;
-use iced::widget::{column, container, row, text};
+use iced::widget::{column, container, row, text, Stack};
 use iced::{Element, Length, Subscription, Task};
 use tokio::sync::mpsc;
 
@@ -89,6 +89,46 @@ pub enum SortDirection {
     Desc,
 }
 
+/// Guided scan profiles for one-click configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuidedScanProfile {
+    FastDiscovery,
+    StandardAudit,
+    DeepAudit,
+    WebServicesAudit,
+    StealthRawScan,
+}
+
+impl GuidedScanProfile {
+    /// Human-readable label for the profile.
+    pub fn label(&self) -> &'static str {
+        match self {
+            GuidedScanProfile::FastDiscovery => "Fast discovery",
+            GuidedScanProfile::StandardAudit => "Standard audit",
+            GuidedScanProfile::DeepAudit => "Deep audit",
+            GuidedScanProfile::WebServicesAudit => "Web services audit",
+            GuidedScanProfile::StealthRawScan => "Stealth/raw scan",
+        }
+    }
+
+    /// All guided profiles.
+    pub fn all() -> &'static [GuidedScanProfile] {
+        &[
+            GuidedScanProfile::FastDiscovery,
+            GuidedScanProfile::StandardAudit,
+            GuidedScanProfile::DeepAudit,
+            GuidedScanProfile::WebServicesAudit,
+            GuidedScanProfile::StealthRawScan,
+        ]
+    }
+}
+
+impl std::fmt::Display for GuidedScanProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.label())
+    }
+}
+
 // ── Message Enum ────────────────────────────────────────────────────────
 
 /// All possible events in the application
@@ -111,6 +151,12 @@ pub enum Message {
     ScanCidrChanged(String),
     ScanPortsChanged(String),
     ScanTypeSelected(ScanType),
+    StartScanRequested,
+    StartScanConfirmed,
+    StartScanCancelled,
+    QuickStartScanCurrentNetwork,
+    QuickStartAdvancedScan,
+    ApplyGuidedProfile(GuidedScanProfile),
 
     // Scan events (from subscription)
     DeviceDiscovered(Device),
@@ -259,6 +305,13 @@ pub struct NetSentinelApp {
     scan_cidr: String,
     scan_ports_str: String,
     scan_type: ScanType,
+    scan_cidr_error: Option<String>,
+    scan_ports_error: Option<String>,
+    scan_ports_warning: Option<String>,
+    show_scan_confirm: bool,
+    scan_confirm_estimated_hosts: u32,
+    scan_confirm_port_summary: String,
+    scan_confirm_warnings: Vec<String>,
     is_scanning: bool,
     is_paused: bool,
     scan_progress: f32,
@@ -337,6 +390,13 @@ impl NetSentinelApp {
                 "21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1723,3306,3389,5900,8080"
                     .to_string(),
             scan_type: ScanType::Connect,
+            scan_cidr_error: None,
+            scan_ports_error: None,
+            scan_ports_warning: None,
+            show_scan_confirm: false,
+            scan_confirm_estimated_hosts: 0,
+            scan_confirm_port_summary: String::new(),
+            scan_confirm_warnings: Vec::new(),
             is_scanning: false,
             is_paused: false,
             scan_progress: 0.0,
@@ -646,6 +706,208 @@ impl NetSentinelApp {
         }
     }
 
+    /// Validate the current scan CIDR and port expression, populating UI error
+    /// and warning fields. Returns true if the inputs are valid.
+    fn validate_scan_inputs(&mut self) -> bool {
+        let mut valid = true;
+
+        match crate::network::sanitize::validate_cidr(&self.scan_cidr) {
+            Ok(_) => self.scan_cidr_error = None,
+            Err(e) => {
+                self.scan_cidr_error = Some(e.to_string());
+                valid = false;
+            }
+        }
+
+        if self.settings_profile.scan_config.scan_ports_enabled {
+            match crate::network::sanitize::parse_port_expression(&self.scan_ports_str) {
+                Ok((_, warning)) => {
+                    self.scan_ports_warning = warning;
+                    self.scan_ports_error = None;
+                }
+                Err(e) => {
+                    self.scan_ports_error = Some(e.to_string());
+                    self.scan_ports_warning = None;
+                    valid = false;
+                }
+            }
+        } else {
+            self.scan_ports_error = None;
+            self.scan_ports_warning = None;
+        }
+
+        valid
+    }
+
+    fn prepare_scan_confirmation(&mut self) {
+        self.scan_confirm_estimated_hosts =
+            crate::network::sanitize::validate_cidr(&self.scan_cidr)
+                .map(|network| {
+                    let prefix = network.prefix();
+                    if prefix >= 32 {
+                        1
+                    } else {
+                        2u32.saturating_pow(u32::from(32 - prefix))
+                    }
+                })
+                .unwrap_or(0);
+
+        self.scan_confirm_port_summary = if self.settings_profile.scan_config.scan_ports_enabled {
+            match crate::network::sanitize::parse_port_expression(&self.scan_ports_str) {
+                Ok((ports, _)) if !ports.is_empty() => format!("{} ports", ports.len()),
+                _ => "default ports".to_string(),
+            }
+        } else {
+            "host discovery only".to_string()
+        };
+
+        let mut warnings = Vec::new();
+        if self.scan_confirm_estimated_hosts > 256 {
+            warnings.push(format!(
+                "Large target range: {} hosts. This may take a while.",
+                self.scan_confirm_estimated_hosts
+            ));
+        }
+
+        let elevated = self
+            .platform_caps
+            .as_ref()
+            .map(|caps| caps.is_elevated)
+            .unwrap_or(false);
+
+        if matches!(
+            self.scan_type,
+            ScanType::Syn | ScanType::Fin | ScanType::Xmas | ScanType::Null | ScanType::Udp
+        ) && !elevated
+        {
+            warnings.push(format!(
+                "{} scan requires elevated privileges. The engine will downgrade to TCP Connect if needed.",
+                self.scan_type
+            ));
+        } else if matches!(self.scan_type, ScanType::Sctp) && !elevated {
+            warnings.push(
+                "SCTP scan requires elevated privileges and will fail without them.".to_string(),
+            );
+        }
+
+        self.scan_confirm_warnings = warnings;
+    }
+
+    /// Apply a guided scan profile to the current scan configuration.
+    /// Returns any warnings that should be surfaced to the user.
+    fn apply_guided_profile(&mut self, profile: GuidedScanProfile) -> Vec<String> {
+        use crate::network::timing::TimingTemplate;
+        use crate::network::web_audit::WebAuditProfile;
+        use crate::settings::SettingsDiscoveryMethod;
+        use crate::types::ScanType;
+
+        let mut warnings = Vec::new();
+
+        let (
+            scan_type,
+            ports_expr,
+            timing,
+            run_active_checks,
+            web_audit_profile,
+            max_hosts,
+            max_ports,
+        ) = match profile {
+            GuidedScanProfile::FastDiscovery => (
+                ScanType::Connect,
+                "top-100",
+                TimingTemplate::Aggressive,
+                false,
+                WebAuditProfile::Safe,
+                100,
+                100,
+            ),
+            GuidedScanProfile::StandardAudit => (
+                ScanType::Connect,
+                "top-1000",
+                TimingTemplate::Normal,
+                true,
+                WebAuditProfile::Safe,
+                50,
+                100,
+            ),
+            GuidedScanProfile::DeepAudit => (
+                ScanType::Connect,
+                "top-10000",
+                TimingTemplate::Polite,
+                true,
+                WebAuditProfile::Aggressive,
+                50,
+                100,
+            ),
+            GuidedScanProfile::WebServicesAudit => (
+                ScanType::Connect,
+                "80,443,8080,8443",
+                TimingTemplate::Normal,
+                false,
+                WebAuditProfile::Aggressive,
+                50,
+                100,
+            ),
+            GuidedScanProfile::StealthRawScan => (
+                ScanType::Syn,
+                "top-1000",
+                TimingTemplate::Sneaky,
+                false,
+                WebAuditProfile::Safe,
+                50,
+                100,
+            ),
+        };
+
+        self.scan_type = scan_type.clone();
+        self.scan_ports_str = ports_expr.to_string();
+        self.settings_profile.scan_config.timing_template = timing;
+        self.settings_profile.scan_config.run_active_checks = run_active_checks;
+        self.settings_profile.scan_config.web_audit_profile = web_audit_profile;
+        self.settings_profile.scan_config.max_concurrent_hosts = max_hosts;
+        self.settings_profile.scan_config.max_concurrent_ports = max_ports;
+        self.settings_profile.scan_config.scan_ports_enabled = true;
+        self.settings_profile.scan_config.discovery_methods = vec![SettingsDiscoveryMethod::All];
+
+        if matches!(
+            scan_type,
+            ScanType::Syn | ScanType::Fin | ScanType::Xmas | ScanType::Null | ScanType::Udp
+        ) {
+            let elevated = self
+                .platform_caps
+                .as_ref()
+                .map(|caps| caps.is_elevated)
+                .unwrap_or(false);
+            if !elevated {
+                warnings.push(format!(
+                    "{} scan requires elevated privileges. The engine will downgrade to TCP Connect if privileges are unavailable.",
+                    scan_type
+                ));
+            }
+        } else if matches!(scan_type, ScanType::Sctp) {
+            let elevated = self
+                .platform_caps
+                .as_ref()
+                .map(|caps| caps.is_elevated)
+                .unwrap_or(false);
+            if !elevated {
+                warnings.push(
+                    "SCTP scan requires elevated privileges and will fail without them."
+                        .to_string(),
+                );
+            }
+        }
+
+        if ports_expr == "top-10000" {
+            warnings.push(
+                "Deep audit scans up to 10,000 ports per host and may take a long time."
+                    .to_string(),
+            );
+        }
+
+        warnings
+    }
+
     /// Handle state updates and dispatch async commands
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
@@ -716,6 +978,35 @@ impl NetSentinelApp {
                     return Task::none();
                 }
 
+                // Validate CIDR and ports before mutating state.
+                if !self.validate_scan_inputs() {
+                    return Task::none();
+                }
+
+                let scan_ports_enabled = self.settings_profile.scan_config.scan_ports_enabled;
+
+                // Resolve ports from the scan page input or from settings.
+                let parsed_ports = if scan_ports_enabled {
+                    match crate::network::sanitize::parse_port_expression(&self.scan_ports_str) {
+                        Ok((ports, warning)) => {
+                            self.scan_ports_warning = warning;
+                            ports
+                        }
+                        Err(e) => {
+                            self.scan_ports_error = Some(e.to_string());
+                            return Task::none();
+                        }
+                    }
+                } else {
+                    Vec::new()
+                };
+
+                let ports = if parsed_ports.is_empty() {
+                    self.settings_profile.scan_config.effective_ports()
+                } else {
+                    parsed_ports
+                };
+
                 self.is_scanning = true;
                 self.is_paused = false;
                 self.scan_progress = 0.0;
@@ -739,14 +1030,6 @@ impl NetSentinelApp {
                     *guard = Some(rx);
                 }
 
-                // Resolve ports from the scan page input or from settings.
-                let parsed_ports = parse_ports(&self.scan_ports_str);
-                let ports = if parsed_ports.is_empty() {
-                    self.settings_profile.scan_config.effective_ports()
-                } else {
-                    parsed_ports
-                };
-
                 let cidr = self.scan_cidr.clone();
                 let scan_type = self.scan_type.clone();
                 let state = self.scan_state.clone();
@@ -761,7 +1044,6 @@ impl NetSentinelApp {
                 let timing_template = self.settings_profile.scan_config.timing_template;
                 let web_audit_profile = self.settings_profile.scan_config.web_audit_profile;
                 let run_active_checks = self.settings_profile.scan_config.run_active_checks;
-                let scan_ports_enabled = self.settings_profile.scan_config.scan_ports_enabled;
 
                 Task::perform(
                     async move {
@@ -787,6 +1069,62 @@ impl NetSentinelApp {
                     },
                     Message::ScanStartResult,
                 )
+            }
+
+            Message::StartScanRequested => {
+                if self.is_scanning {
+                    return Task::none();
+                }
+
+                self.scan_cidr_error = None;
+                self.scan_ports_error = None;
+
+                if !self.validate_scan_inputs() {
+                    return Task::none();
+                }
+
+                let is_first_use = self.history_entries.is_empty();
+                if self.settings_profile.ui_preferences.confirm_before_scan || is_first_use {
+                    self.prepare_scan_confirmation();
+                    self.show_scan_confirm = true;
+                    Task::none()
+                } else {
+                    Task::done(Message::StartScan)
+                }
+            }
+
+            Message::StartScanConfirmed => {
+                self.show_scan_confirm = false;
+                self.scan_confirm_warnings.clear();
+                Task::done(Message::StartScan)
+            }
+
+            Message::StartScanCancelled => {
+                self.show_scan_confirm = false;
+                self.scan_confirm_warnings.clear();
+                Task::none()
+            }
+
+            Message::QuickStartScanCurrentNetwork => {
+                if let Some(ref info) = self.network_info {
+                    if !info.ip_address.is_empty() && info.ip_address != "Unknown" {
+                        self.scan_cidr = calculate_cidr(&info.ip_address);
+                    }
+                }
+                Task::done(Message::StartScanRequested)
+            }
+
+            Message::QuickStartAdvancedScan => {
+                self.current_page = Page::Scan;
+                Task::none()
+            }
+
+            Message::ApplyGuidedProfile(profile) => {
+                let warnings = self.apply_guided_profile(profile);
+                if !warnings.is_empty() {
+                    self.status_message = Some(warnings.join(" "));
+                }
+                Task::none()
             }
 
             Message::StopScan => {
@@ -1628,11 +1966,21 @@ impl NetSentinelApp {
             .width(Length::Fill)
             .height(Length::Fill);
 
-        container(layout)
+        let main_view = container(layout)
             .width(Length::Fill)
             .height(Length::Fill)
-            .style(theme::app_background)
-            .into()
+            .style(theme::app_background);
+
+        if self.show_scan_confirm {
+            Stack::new()
+                .push(main_view)
+                .push(self.view_scan_confirm_modal())
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        } else {
+            main_view.into()
+        }
     }
 
     /// Render the global persistent top header
@@ -1772,6 +2120,80 @@ impl NetSentinelApp {
             .width(Length::Fill)
             .style(theme::header_style)
             .into()
+    }
+
+    /// Render the scan confirmation modal overlay.
+    fn view_scan_confirm_modal(&self) -> Element<'_, Message> {
+        use iced::widget::{button, column, container, row, text, MouseArea};
+
+        let mut warning_col = column![].spacing(6);
+        for warning in &self.scan_confirm_warnings {
+            warning_col = warning_col.push(text(warning.clone()).color(theme::WARNING).size(12));
+        }
+
+        let content = column![
+            text("Confirm Scan").color(theme::TEXT).size(18),
+            text(format!("Target: {}", self.scan_cidr))
+                .color(theme::TEXT_MUTED)
+                .size(13),
+            text(format!(
+                "Estimated hosts: {}",
+                self.scan_confirm_estimated_hosts
+            ))
+            .color(theme::TEXT_MUTED)
+            .size(13),
+            text(format!("Scan type: {}", self.scan_type))
+                .color(theme::TEXT_MUTED)
+                .size(13),
+            text(format!("Ports: {}", self.scan_confirm_port_summary))
+                .color(theme::TEXT_MUTED)
+                .size(13),
+            warning_col,
+            text("Only scan networks you own or have explicit permission to test.")
+                .color(theme::DANGER)
+                .size(12),
+            row![
+                button(text("Cancel").color(theme::TEXT).size(13))
+                    .padding([8, 16])
+                    .style(theme::secondary_button)
+                    .on_press(Message::StartScanCancelled),
+                button(text("Start Scan").color(theme::TEXT).size(13))
+                    .padding([8, 16])
+                    .style(theme::primary_button)
+                    .on_press(Message::StartScanConfirmed),
+            ]
+            .spacing(12)
+            .align_y(iced::Alignment::Center),
+        ]
+        .spacing(12)
+        .align_x(iced::Alignment::Center);
+
+        let card = container(content)
+            .padding(24)
+            .width(Length::Fixed(420.0))
+            .style(theme::modal_card_style);
+
+        // Capture events on the card background so they do not propagate to the
+        // overlay cancel handler.
+        let card_area = MouseArea::new(card).on_press(Message::Tick);
+
+        let overlay = container(
+            // Empty space filler that dims the main view.
+            iced::widget::horizontal_space().width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(theme::modal_overlay_style);
+
+        MouseArea::new(
+            Stack::new()
+                .push(overlay)
+                .push(card_area)
+                .width(Length::Fill)
+                .height(Length::Fill),
+        )
+        .on_press(Message::StartScanCancelled)
+        .into()
     }
 
     /// Subscribe to backend events when scanning is active and globally for IPC
@@ -2025,20 +2447,13 @@ fn load_topology_graph(state: Arc<SharedScanState>) -> Task<Message> {
 }
 
 /// Calculate a /24 CIDR from an IP address
-fn calculate_cidr(ip: &str) -> String {
+pub(crate) fn calculate_cidr(ip: &str) -> String {
     let parts: Vec<&str> = ip.split('.').collect();
     if parts.len() == 4 {
         format!("{}.{}.{}.0/24", parts[0], parts[1], parts[2])
     } else {
         "192.168.1.0/24".to_string()
     }
-}
-
-/// Parse a comma-separated port string into a Vec<u16>
-fn parse_ports(s: &str) -> Vec<u16> {
-    s.split(',')
-        .filter_map(|p| p.trim().parse::<u16>().ok())
-        .collect()
 }
 
 // ── Application Entry Point ─────────────────────────────────────────────
