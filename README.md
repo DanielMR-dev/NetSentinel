@@ -2,64 +2,69 @@
 
 NetSentinel is a cross-platform desktop application for network discovery, security auditing, and infrastructure monitoring. Built for Blue Team, Purple Team, and SOC analysts, it combines a high-performance Rust scanning engine with a modern native Rust GUI (Iced) to deliver real-time network intelligence without leaving your desktop.
 
+## Project Status
+
+> **Milestone 0 — Foundation & Documentation**
+>
+> NetSentinel is under active development. The core application shell, async scanning pipeline, settings/history/baseline persistence, and basic TCP-based discovery are in place. Many advanced scanners and reporting features exist as modules but are considered **experimental** until they have full end-to-end validation and automated test coverage.
+>
+> Current focus: stabilize host discovery and port scanning, harden privilege-aware fallbacks, and expand automated tests before declaring broader features production-ready.
+
 ## Features
 
-### Host Discovery
-- ARP Sweep - Layer 2 discovery via raw Ethernet frames (requires elevated privileges)
-- ARP Table - Passive discovery from the system ARP cache (no privileges needed)
-- ICMP Ping Sweep - Raw socket ICMP Echo Request scanning with privilege-aware fallback
-- TCP Probe - Concurrent TCP connect probes on common service ports
-- IPv6 Discovery - Host discovery for IPv6 networks
-- mDNS/NetBIOS - Name resolution via multicast DNS and NetBIOS protocols
+Features are grouped by maturity. Items in **Experimental** have initial implementations and may work in common scenarios but are not yet fully validated across all supported platforms. Items in **Planned** are on the roadmap but not yet available.
 
-### Port Scanning
-- TCP Connect Scan - Full TCP handshake scanning (no privileges required)
-- TCP SYN Stealth Scan - Half-open scanning via raw packet injection (requires root/CAP_NET_RAW)
-- TCP FIN/XMAS/NULL Scans - Advanced stealth scanning techniques for firewall evasion
-- UDP Scan - ICMP Port Unreachable-based UDP port discovery on critical services (DNS, DHCP, NTP, SNMP, etc.)
-- SCTP INIT Scan - Stream Control Transmission Protocol discovery
-- Timing Templates - Configurable speeds (T0 through T5) for IDS evasion or maximum speed
+### Implemented
 
-### Service Identification
-- Banner Grabbing - Protocol-aware probes for SSH, HTTP, SMTP, FTP, MySQL, PostgreSQL, RDP, and more
-- Nmap Service Detection - Fingerprint matching against the nmap-service-probes database for accurate service identification
-- TLS/SSL Analysis - Certificate inspection including version, cipher suite, issuer, expiry, self-signed detection, and SAN domain enumeration
-- OS Fingerprinting - TTL-based OS estimation from response packets
-- OUI Vendor Lookup - MAC address manufacturer identified from an IEEE OUI database
+- **TCP Connect Scan** — Full TCP handshake scanning (no privileges required)
+- **ARP Table Discovery** — Passive discovery from the system ARP cache (no privileges needed)
+- **Device & Network Information** — Local system and network interface summary
+- **Settings Profiles** — Persistent scan configurations with CRUD management
+- **Scan History** — Persistent log of past scans with device details (capped at 100 entries)
+- **Baseline Snapshots** — Save network state as SQLite-backed baselines and diff against future scans
+- **Dark Theme** — Built-in dark theme with a comprehensive color token system
+- **Real-time Progress** — Live progress bar, device count, and auto-scrolling scan logs
+- **gRPC IPC Server** — Unix Domain Socket server for the Nexus ecosystem protocol
 
-### Vulnerability Assessment
-- Offline CVE Matching - Known CVE entries matched against discovered service banners using a local SQLite database
-- Real-time CVE Alerts - Severity-classified alerts (Critical/High/Medium/Low) with CVSS scores
-- TLS Certificate Warnings - Expired, self-signed, and weak cipher suite detection
-- Active Vulnerability Checks - Targeted probes for known critical vulnerabilities on discovered services
-- Web Security Auditing - HTTP/HTTPS security header analysis, misconfiguration detection, and vulnerability scanning
-- Threat Detection - Identification of suspicious services, open proxies, and potential attack vectors
+### Experimental
 
-### Reporting & Compliance
-- HTML/PDF Reports - Professional audit reports with device details, vulnerabilities, and recommendations
-- CSV/JSON Export - Raw data export for integration with other tools
-- CVSS Scoring - Common Vulnerability Scoring System integration with EPSS probability data
-- Compliance Checks - Automated assessment against CIS, HIPAA, and PCI DSS benchmarks
+These modules are implemented and wired into the UI/scan pipeline but may be incomplete, platform-specific, or awaiting comprehensive test coverage.
 
-### Network Intelligence
-- Baseline Snapshots - Save network state as SQLite-backed baselines and diff against future scans to detect changes
-- Scan History - Persistent log of past scans with device details and re-run capability (capped at 100 entries)
-- Background Packet Capture - Continuous network monitoring thread for passive discovery
-- Audit Export - CSV, JSON, HTML, and PDF export formats
+- **ARP Sweep** — Layer 2 discovery via raw Ethernet frames (requires elevated privileges)
+- **ICMP Ping Sweep** — Raw socket ICMP Echo Request scanning with privilege-aware fallback
+- **TCP SYN Stealth Scan** — Half-open scanning via raw packet injection (requires root/CAP_NET_RAW)
+- **TCP FIN/XMAS/NULL Scans** — Advanced stealth scanning techniques for firewall evasion
+- **UDP Scan** — ICMP Port Unreachable-based UDP port discovery on critical services
+- **SCTP INIT Scan** — Stream Control Transmission Protocol discovery
+- **IPv6 Discovery** — Host discovery for IPv6 networks
+- **mDNS/NetBIOS** — Name resolution via multicast DNS and NetBIOS protocols
+- **Banner Grabbing** — Protocol-aware probes for SSH, HTTP, SMTP, FTP, MySQL, PostgreSQL, RDP, and more
+- **Nmap Service Detection** — Fingerprint matching against the nmap-service-probes database
+- **TLS/SSL Analysis** — Certificate inspection including version, cipher suite, issuer, expiry, self-signed detection, and SAN domain enumeration
+- **OS Fingerprinting** — TTL-based OS estimation from response packets
+- **OUI Vendor Lookup** — MAC address manufacturer identified from an IEEE OUI database
+- **CVE Matching** — Known CVE entries matched against discovered service banners using a local SQLite database
+- **Active Vulnerability Checks** — Targeted probes for known critical vulnerabilities on discovered services
+- **Web Security Auditing** — HTTP/HTTPS security header analysis and misconfiguration detection
+- **Threat Detection** — Identification of suspicious services, open proxies, and potential attack vectors
+- **HTML/PDF Reports** — Audit report generation with device details, vulnerabilities, and recommendations
+- **CSV/JSON Export** — Raw data export for integration with other tools
+- **CVSS Scoring** — Common Vulnerability Scoring System integration
+- **Compliance Checks** — Automated assessment against CIS, HIPAA, and PCI DSS benchmarks
+- **Topology View** — Network topology visualization page
 
-### User Experience
-- Dark/Light Theme - Built-in themes optimized for readability with comprehensive color token system
-- Keyboard Shortcuts - Full keyboard navigation for efficient usage
-- Settings Profiles - Persistent scan configurations with CRUD management
-- Real-time Progress - Live progress bar, device count, and auto-scrolling scan logs
-- Search & Filter - Real-time device filtering by IP, MAC, hostname, vendor, and status
-- Sortable Tables - Click-to-sort device tables by IP, MAC, vendor, hostname, open ports, and last seen
+### Planned
 
-### Inter-Tool Communication (Nexus Protocol)
-- gRPC IPC Server - Unix Domain Socket server for communication with other Nexus ecosystem tools
-- Bidirectional Streaming - Real-time event exchange with SHADOW_DECOY, VENOM_WEAVER, AEGIS_FUZZ, and SLEUTH_HOUND
-- Security Alert Integration - Receive and display security alerts from external tools
-- Remote Command Trigger - Execute scan operations via IPC commands
+- **Light Theme** — Alternative light color scheme
+- **Keyboard Shortcuts** — Full keyboard navigation for efficient usage
+- **Advanced Search & Filter** — Real-time device filtering by IP, MAC, hostname, vendor, and status
+- **Sortable Tables** — Click-to-sort device tables by IP, MAC, vendor, hostname, open ports, and last seen
+- **EPSS Integration** — Exploit Prediction Scoring System probability data
+- **Scheduled Scans** — Recurring scan jobs and alerting
+- **SIEM Export** — Native export to common SIEM formats
+- **Cloud Asset Discovery** — Discovery of cloud-managed endpoints and APIs
+- **Multi-User Collaboration** — Shared baselines and scan results across teams
+- **REST API Server** — HTTP API for external integrations
 
 ## Tech Stack
 
@@ -163,16 +168,14 @@ sudo dnf install dbus-devel pkgconf-pkg-config libX11-devel alsa-lib-devel syste
 
 ### Installation
 
+The `proto/` directory is a **required Git submodule** registered in `.gitmodules`. It contains the Nexus Protocol definitions used by the gRPC IPC server. Make sure to clone recursively, or initialize the submodule after cloning:
+
 ```bash
-git clone https://github.com/your-username/NetSentinel.git
+git clone --recursive https://github.com/DanielMR-dev/NetSentinel.git
 cd NetSentinel
 
-# Add the protocol repository inside a folder named "proto" to maintain the contract
-git submodule add https://github.com/DanielMR-dev/nexus-protocol proto
-
-# Git will create a hidden file named .gitmodules. Register the changes:
-git add .gitmodules proto/
-git commit -m "infra: added nexus-protocol as a git submodule"
+# If you already cloned without --recursive, initialize the submodule:
+git submodule update --init --recursive
 
 cargo build --release
 ```
@@ -209,6 +212,16 @@ cargo test
 
 The application detects privileges at startup and displays a warning banner if elevated features are unavailable. Features requiring elevated privileges automatically fall back to unprivileged alternatives where possible.
 
+## Requires Elevated Privileges
+
+The following features require root/administrator access or `CAP_NET_RAW` on Linux. They will not function without elevation unless a fallback is available:
+
+- **ARP Sweep** — sends raw Ethernet frames
+- **ICMP Ping Sweep** — opens raw sockets for ICMP
+- **TCP SYN Stealth Scan** — crafts raw TCP packets
+- **TCP FIN/XMAS/NULL Scans** — crafts raw TCP packets with custom flag combinations
+- **UDP Scan** — uses raw sockets to read ICMP unreachable responses
+
 ## Supported Platforms
 
 | Platform | Discovery | Gateway Detection | Notes |
@@ -244,6 +257,10 @@ The `nmap_parser` crate is a standalone library that defines `Probe`, `Match`, a
 | Event channel batch interval | 200ms | `tokio::time::interval` in subscriptions |
 | IPC channel buffer | 1024 messages | `mpsc::channel(1024)` |
 
+## Screenshots
+
+Screenshots will be added to `docs/images/` as the UI stabilizes. See [`docs/images/README.md`](docs/images/README.md) for the screenshot manifest and placeholder list.
+
 ## Theme System
 
 All colors are defined as module-level constants in `ui/theme.rs`. No hardcoded colors appear in view code.
@@ -264,7 +281,7 @@ All colors are defined as module-level constants in `ui/theme.rs`. No hardcoded 
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the MIT License — see the repository for the full license text.
 
 ---
 

@@ -5,9 +5,9 @@ members = ["tools/nmap_parser"]
 name = "netsentinel"
 version = "0.1.0"
 description = "A network scanning and audit tool built with Rust + Iced"
-authors = ["you"]
-license = ""
-repository = ""
+authors = ["Daniel Mira Restrepo"]
+license = "MIT"
+repository = "https://github.com/DanielMR-dev/NetSentinel"
 edition = "2021"
 rust-version = "1.77.2"
 
