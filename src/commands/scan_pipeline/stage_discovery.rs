@@ -19,6 +19,65 @@ enum DiscoveryTaskResult {
     Active(Option<Device>, IpAddr),
 }
 
+async fn emit_discovery_result(
+    task_res: DiscoveryTaskResult,
+    ctx: &PipelineContext,
+    emitted_ips: &mut HashSet<IpAddr>,
+    out_tx: &mpsc::Sender<Device>,
+    total_hosts: u32,
+) -> Result<(), ()> {
+    match task_res {
+        DiscoveryTaskResult::Passive(devices) => {
+            for device in devices {
+                if let Ok(ip) = device.ip.parse::<IpAddr>() {
+                    if emitted_ips.insert(ip) {
+                        let _ = ctx.event_tx.send(AppEvent::DeviceFound(device.clone()));
+                        if out_tx.send(device).await.is_err() {
+                            return Err(());
+                        }
+                    }
+                }
+            }
+        }
+        DiscoveryTaskResult::Active(maybe_device, ip) => {
+            let current = ctx.state.scanned_count.fetch_add(1, Ordering::SeqCst) + 1;
+
+            if current % PROGRESS_INTERVAL == 0 || current == 1 {
+                let _ = ctx.event_tx.send(AppEvent::ScanLog {
+                    level: "debug".to_string(),
+                    message: format!("Scanning {} ({}/{})", ip, current, total_hosts),
+                    target: Some(ip.to_string()),
+                    timestamp: chrono::Utc::now().timestamp(),
+                });
+            }
+
+            if current % PROGRESS_INTERVAL == 0 || current == total_hosts {
+                let _ = ctx.event_tx.send(AppEvent::ScanProgress {
+                    scanned: current,
+                    total: total_hosts,
+                    current_target: ip.to_string(),
+                });
+            }
+
+            if let Some(device) = maybe_device {
+                if emitted_ips.insert(ip) {
+                    let _ = ctx.event_tx.send(AppEvent::ScanLog {
+                        level: "info".to_string(),
+                        message: format!("Host found: {}", ip),
+                        target: Some(ip.to_string()),
+                        timestamp: chrono::Utc::now().timestamp(),
+                    });
+                    let _ = ctx.event_tx.send(AppEvent::DeviceFound(device.clone()));
+                    if out_tx.send(device).await.is_err() {
+                        return Err(());
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Stage 2: Host Discovery
 /// Discovers live hosts using configured methods. Runs passive resolution (NetBIOS, mDNS, IPv6)
 /// in parallel, and processes targets from the input channel via active TCP pings.
@@ -109,60 +168,46 @@ pub async fn stage_host_discovery(
             // Process finished sub-tasks
             Some(res) = join_set.join_next(), if !join_set.is_empty() => {
                 if let Ok(Ok(task_res)) = res {
-                    match task_res {
-                        DiscoveryTaskResult::Passive(devices) => {
-                            for device in devices {
-                                if let Ok(ip) = device.ip.parse::<IpAddr>() {
-                                    if emitted_ips.insert(ip) {
-                                        let _ = ctx.event_tx.send(AppEvent::DeviceFound(device.clone()));
-                                        if out_tx.send(device).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        DiscoveryTaskResult::Active(maybe_device, ip) => {
-                            let current = ctx.state.scanned_count.fetch_add(1, Ordering::SeqCst) + 1;
-
-                            if current % PROGRESS_INTERVAL == 0 || current == 1 {
-                                let _ = ctx.event_tx.send(AppEvent::ScanLog {
-                                    level: "debug".to_string(),
-                                    message: format!("Scanning {} ({}/{})", ip, current, total_hosts),
-                                    target: Some(ip.to_string()),
-                                    timestamp: chrono::Utc::now().timestamp(),
-                                });
-                            }
-
-                            if current % PROGRESS_INTERVAL == 0 || current == total_hosts {
-                                let _ = ctx.event_tx.send(AppEvent::ScanProgress {
-                                    scanned: current,
-                                    total: total_hosts,
-                                    current_target: ip.to_string(),
-                                });
-                            }
-
-                            if let Some(device) = maybe_device {
-                                if emitted_ips.insert(ip) {
-                                    let _ = ctx.event_tx.send(AppEvent::ScanLog {
-                                        level: "info".to_string(),
-                                        message: format!("Host found: {}", ip),
-                                        target: Some(ip.to_string()),
-                                        timestamp: chrono::Utc::now().timestamp(),
-                                    });
-                                    let _ = ctx.event_tx.send(AppEvent::DeviceFound(device.clone()));
-                                    if out_tx.send(device).await.is_err() {
-                                        break;
-                                    }
-                                }
-                            }
-                        }
+                    if emit_discovery_result(
+                        task_res,
+                        ctx.as_ref(),
+                        &mut emitted_ips,
+                        &out_tx,
+                        total_hosts,
+                    )
+                    .await
+                    .is_err()
+                    {
+                        break;
                     }
                 }
             }
 
             // Read next IP from Target Stream Stage
-            Some(ip) = in_rx.recv() => {
+            maybe_ip = in_rx.recv() => {
+                let ip = match maybe_ip {
+                    Some(ip) => ip,
+                    None => {
+                        while let Some(res) = join_set.join_next().await {
+                            if let Ok(Ok(task_res)) = res {
+                                let _ = emit_discovery_result(
+                                    task_res,
+                                    ctx.as_ref(),
+                                    &mut emitted_ips,
+                                    &out_tx,
+                                    total_hosts,
+                                )
+                                .await;
+                            }
+                        }
+                        if *cancel_rx.borrow() {
+                            join_set.abort_all();
+                            return Err(ScanError::Cancelled);
+                        }
+                        break;
+                    }
+                };
+
                 wait_if_paused(&mut pause_rx).await;
 
                 if *cancel_rx.borrow() {
@@ -200,12 +245,6 @@ pub async fn stage_host_discovery(
                 });
             }
 
-            else => {
-                // Input channel closed and all tasks joined
-                if join_set.is_empty() {
-                    break;
-                }
-            }
         }
     }
 

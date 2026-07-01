@@ -38,7 +38,32 @@ impl Default for TimingTemplate {
     }
 }
 
+impl std::fmt::Display for TimingTemplate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TimingTemplate::Paranoid => write!(f, "Paranoid (T0)"),
+            TimingTemplate::Sneaky => write!(f, "Sneaky (T1)"),
+            TimingTemplate::Polite => write!(f, "Polite (T2)"),
+            TimingTemplate::Normal => write!(f, "Normal (T3)"),
+            TimingTemplate::Aggressive => write!(f, "Aggressive (T4)"),
+            TimingTemplate::Insane => write!(f, "Insane (T5)"),
+        }
+    }
+}
+
 impl TimingTemplate {
+    /// All timing templates available in the UI.
+    pub fn all_templates() -> &'static [TimingTemplate] {
+        &[
+            TimingTemplate::Paranoid,
+            TimingTemplate::Sneaky,
+            TimingTemplate::Polite,
+            TimingTemplate::Normal,
+            TimingTemplate::Aggressive,
+            TimingTemplate::Insane,
+        ]
+    }
+
     /// Maximum concurrent connections for this timing template.
     pub fn max_concurrent(&self) -> usize {
         match self {

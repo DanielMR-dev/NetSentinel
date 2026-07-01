@@ -196,7 +196,7 @@ pub async fn discover_hosts(
 /// - **Linux**: Reads `/proc/net/arp`
 /// - **Windows**: Executes `arp -a` and searches output
 /// - **macOS**: Executes `arp -a` and searches output
-async fn get_mac_from_arp(ip: &str) -> Option<String> {
+pub(crate) async fn get_mac_from_arp(ip: &str) -> Option<String> {
     let provider = crate::network::platform::create_arp_provider();
     provider.get_mac_for_ip(ip).await
 }
@@ -365,7 +365,7 @@ pub async fn scan_ports(ip: IpAddr, ports: &[u16], timeout_ms: u64) -> Vec<Port>
 }
 
 /// Scan a single port with timeout
-async fn scan_single_port(ip: IpAddr, port: u16, timeout_ms: u64) -> PortState {
+pub(crate) async fn scan_single_port(ip: IpAddr, port: u16, timeout_ms: u64) -> PortState {
     let addr = std::net::SocketAddr::new(ip, port);
     let timeout_duration = Duration::from_millis(timeout_ms);
 

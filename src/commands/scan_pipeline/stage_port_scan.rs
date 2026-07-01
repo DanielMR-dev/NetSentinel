@@ -89,7 +89,25 @@ pub async fn stage_port_scan(
             }
 
             // Read next device from Host Discovery Stage
-            Some(mut device) = in_rx.recv() => {
+            maybe_device = in_rx.recv() => {
+                let mut device = match maybe_device {
+                    Some(device) => device,
+                    None => {
+                        while let Some(res) = join_set.join_next().await {
+                            if let Ok(Ok(device)) = res {
+                                if out_tx.send(device).await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                        if *cancel_rx.borrow() {
+                            join_set.abort_all();
+                            return Err(ScanError::Cancelled);
+                        }
+                        break;
+                    }
+                };
+
                 wait_if_paused(&mut pause_rx).await;
 
                 if *cancel_rx.borrow() {
@@ -186,11 +204,6 @@ pub async fn stage_port_scan(
                 });
             }
 
-            else => {
-                if join_set.is_empty() {
-                    break;
-                }
-            }
         }
     }
 

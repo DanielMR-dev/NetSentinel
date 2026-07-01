@@ -20,6 +20,22 @@ pub enum WebAuditProfile {
     Aggressive,
 }
 
+impl WebAuditProfile {
+    /// All web audit profiles available in the UI.
+    pub fn all_profiles() -> &'static [WebAuditProfile] {
+        &[WebAuditProfile::Safe, WebAuditProfile::Aggressive]
+    }
+}
+
+impl std::fmt::Display for WebAuditProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WebAuditProfile::Safe => write!(f, "Safe"),
+            WebAuditProfile::Aggressive => write!(f, "Aggressive"),
+        }
+    }
+}
+
 /// The result of a web audit on a specific service
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

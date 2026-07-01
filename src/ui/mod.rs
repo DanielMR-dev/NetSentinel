@@ -24,8 +24,10 @@ use crate::events::AppEvent;
 use crate::history::ScanHistoryEntry;
 use crate::network::cve::CveMatch;
 use crate::network::privileges::PrivilegeStatus;
+use crate::network::timing::TimingTemplate;
+use crate::network::web_audit::WebAuditProfile;
 use crate::scan_store::StoredDeviceSummary;
-use crate::settings::SettingsProfile;
+use crate::settings::{SettingsDiscoveryMethod, SettingsProfile};
 use crate::state::SharedScanState;
 use crate::types::{Device, Finding, FindingSeverity, ScanType};
 
@@ -158,6 +160,10 @@ pub enum Message {
     SettingsMaxPortsChanged(String),
     SettingsRetryChanged(String),
     SettingsScanPortsToggled(bool),
+    SettingsTimingTemplateSelected(TimingTemplate),
+    SettingsWebAuditProfileSelected(WebAuditProfile),
+    SettingsRunActiveChecksToggled(bool),
+    SettingsDiscoveryMethodToggled(String, bool),
     SettingsAutoRefreshToggled(bool),
     SettingsConfirmScanToggled(bool),
     SettingsAdvancedToggled(bool),
@@ -718,14 +724,29 @@ impl NetSentinelApp {
                     *guard = Some(rx);
                 }
 
-                // Parse ports
-                let ports = parse_ports(&self.scan_ports_str);
+                // Resolve ports from the scan page input or from settings.
+                let parsed_ports = parse_ports(&self.scan_ports_str);
+                let ports = if parsed_ports.is_empty() {
+                    self.settings_profile.scan_config.effective_ports()
+                } else {
+                    parsed_ports
+                };
+
                 let cidr = self.scan_cidr.clone();
                 let scan_type = self.scan_type.clone();
                 let state = self.scan_state.clone();
                 let timeout = self.settings_profile.scan_config.timeout_ms;
                 let max_hosts = self.settings_profile.scan_config.max_concurrent_hosts as u32;
+                let max_ports = self.settings_profile.scan_config.max_concurrent_ports as u32;
                 let retry = self.settings_profile.scan_config.retry_count as u8;
+                let discovery_methods = self
+                    .settings_profile
+                    .scan_config
+                    .effective_discovery_methods();
+                let timing_template = self.settings_profile.scan_config.timing_template;
+                let web_audit_profile = self.settings_profile.scan_config.web_audit_profile;
+                let run_active_checks = self.settings_profile.scan_config.run_active_checks;
+                let scan_ports_enabled = self.settings_profile.scan_config.scan_ports_enabled;
 
                 Task::perform(
                     async move {
@@ -734,15 +755,16 @@ impl NetSentinelApp {
                             tx,
                             cidr,
                             timeout,
-                            !ports.is_empty(),
+                            scan_ports_enabled,
                             ports,
                             Some(max_hosts),
-                            None,
+                            Some(max_ports),
+                            Some(discovery_methods),
                             Some(retry),
                             Some(scan_type),
-                            None,
-                            Some(crate::network::web_audit::WebAuditProfile::Safe),
-                            Some(true),
+                            Some(timing_template),
+                            Some(web_audit_profile),
+                            Some(run_active_checks),
                         )
                         .await
                         .map(|r| r.scan_id)
@@ -754,11 +776,15 @@ impl NetSentinelApp {
 
             Message::StopScan => {
                 let state = self.scan_state.clone();
+                let event_tx = self
+                    .event_tx
+                    .clone()
+                    .unwrap_or_else(|| mpsc::unbounded_channel().0);
                 Task::perform(
                     async move {
-                        state.set_running(false);
-                        state.set_cancelled().await;
-                        Ok(()) as Result<(), String>
+                        crate::commands::stop_scan(state, event_tx)
+                            .await
+                            .map_err(|e| e.to_string())
                     },
                     Message::ScanStopResult,
                 )
@@ -928,6 +954,11 @@ impl NetSentinelApp {
             }
 
             Message::ScanStopResult(result) => {
+                self.is_scanning = false;
+                self.is_paused = false;
+                if let Ok(mut guard) = self.event_rx.try_lock() {
+                    *guard = None;
+                }
                 if let Err(e) = result {
                     self.status_message = Some(format!("Failed to stop scan: {}", e));
                 }
@@ -1103,6 +1134,59 @@ impl NetSentinelApp {
 
             Message::SettingsScanPortsToggled(val) => {
                 self.settings_profile.scan_config.scan_ports_enabled = val;
+                Task::none()
+            }
+
+            Message::SettingsTimingTemplateSelected(template) => {
+                self.settings_profile.scan_config.timing_template = template;
+                Task::none()
+            }
+
+            Message::SettingsWebAuditProfileSelected(profile) => {
+                self.settings_profile.scan_config.web_audit_profile = profile;
+                Task::none()
+            }
+
+            Message::SettingsRunActiveChecksToggled(val) => {
+                self.settings_profile.scan_config.run_active_checks = val;
+                Task::none()
+            }
+
+            Message::SettingsDiscoveryMethodToggled(method, enabled) => {
+                let methods = &mut self.settings_profile.scan_config.discovery_methods;
+                let all = vec![
+                    SettingsDiscoveryMethod::ArpTable,
+                    SettingsDiscoveryMethod::TcpProbe,
+                    SettingsDiscoveryMethod::IcmpPing,
+                ];
+
+                if method == "all" {
+                    if enabled {
+                        *methods = vec![SettingsDiscoveryMethod::All];
+                    } else {
+                        methods.retain(|m| !matches!(m, SettingsDiscoveryMethod::All));
+                    }
+                } else {
+                    methods.retain(|m| !matches!(m, SettingsDiscoveryMethod::All));
+                    let target = match method.as_str() {
+                        "arp" => SettingsDiscoveryMethod::ArpTable,
+                        "tcp_probe" => SettingsDiscoveryMethod::TcpProbe,
+                        "icmp" => SettingsDiscoveryMethod::IcmpPing,
+                        _ => SettingsDiscoveryMethod::TcpProbe,
+                    };
+                    if enabled {
+                        if !methods.iter().any(|m| *m == target) {
+                            methods.push(target);
+                        }
+                    } else {
+                        methods.retain(|m| *m != target);
+                    }
+                    if methods.is_empty() {
+                        *methods = all;
+                    } else if methods.len() == all.len() {
+                        *methods = vec![SettingsDiscoveryMethod::All];
+                    }
+                }
                 Task::none()
             }
 

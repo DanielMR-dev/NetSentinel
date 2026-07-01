@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use crate::state::ScanSemaphores;
 use crate::types::Device;
 
 /// Shared scan state that can be accessed from multiple commands.
@@ -21,6 +22,11 @@ pub struct SharedScanState {
     pub cancel_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
     pub current_target: Arc<Mutex<Option<String>>>,
     pub current_scan_id: Arc<Mutex<Option<String>>>,
+    /// Global/shared semaphores used by all scan pipeline stages.
+    pub semaphores: Arc<Mutex<ScanSemaphores>>,
+    /// Active pipeline task supervisor. Holds the `JoinSet` for all spawned
+    /// stage tasks so `stop_scan` can abort and join them with a timeout.
+    pipeline: Arc<Mutex<Option<tokio::task::JoinSet<()>>>>,
 }
 
 impl Default for SharedScanState {
@@ -42,6 +48,8 @@ impl SharedScanState {
             cancel_tx: Arc::new(Mutex::new(None)),
             current_target: Arc::new(Mutex::new(None)),
             current_scan_id: Arc::new(Mutex::new(None)),
+            semaphores: Arc::new(Mutex::new(ScanSemaphores::new(50, 100, 50, 16))),
+            pipeline: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -150,5 +158,20 @@ impl SharedScanState {
 
     pub async fn set_cancel_tx(&self, tx: tokio::sync::oneshot::Sender<()>) {
         *self.cancel_tx.lock().await = Some(tx);
+    }
+
+    /// Reconfigure shared semaphores from the active scan settings.
+    pub async fn configure_semaphores(&self, hosts: usize, ports: usize) {
+        self.semaphores.lock().await.configure(hosts, ports);
+    }
+
+    /// Store the active pipeline supervisor.
+    pub async fn set_pipeline(&self, join_set: tokio::task::JoinSet<()>) {
+        *self.pipeline.lock().await = Some(join_set);
+    }
+
+    /// Take ownership of the active pipeline supervisor.
+    pub async fn take_pipeline(&self) -> Option<tokio::task::JoinSet<()>> {
+        self.pipeline.lock().await.take()
     }
 }

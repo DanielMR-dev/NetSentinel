@@ -1,8 +1,13 @@
 //! Settings view — profile manager, scan config editor, UI preferences.
 
-use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input};
+use iced::widget::{
+    button, checkbox, column, container, pick_list, row, scrollable, text, text_input,
+};
 use iced::{Alignment, Length};
 
+use crate::network::timing::TimingTemplate;
+use crate::network::web_audit::WebAuditProfile;
+use crate::settings::SettingsDiscoveryMethod;
 use crate::ui::theme::{self, TEXT, TEXT_MUTED};
 use crate::ui::widgets;
 use crate::ui::{Message, NetSentinelApp};
@@ -109,6 +114,62 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
     .on_toggle(Message::SettingsScanPortsToggled)
     .size(14);
 
+    let timing_template_picker = pick_list(
+        &TimingTemplate::all_templates()[..],
+        Some(profile.scan_config.timing_template),
+        Message::SettingsTimingTemplateSelected,
+    )
+    .padding(8)
+    .text_size(13)
+    .width(Length::Fill);
+
+    let web_audit_profile_picker = pick_list(
+        &WebAuditProfile::all_profiles()[..],
+        Some(profile.scan_config.web_audit_profile),
+        Message::SettingsWebAuditProfileSelected,
+    )
+    .padding(8)
+    .text_size(13)
+    .width(Length::Fill);
+
+    let active_checks_check = checkbox(
+        "Run Active Vulnerability Checks",
+        profile.scan_config.run_active_checks,
+    )
+    .on_toggle(Message::SettingsRunActiveChecksToggled)
+    .size(14);
+
+    let discovery_methods = &profile.scan_config.discovery_methods;
+    let is_all = discovery_methods
+        .iter()
+        .any(|m| matches!(m, SettingsDiscoveryMethod::All));
+    let has_arp = is_all
+        || discovery_methods
+            .iter()
+            .any(|m| matches!(m, SettingsDiscoveryMethod::ArpTable));
+    let has_tcp = is_all
+        || discovery_methods
+            .iter()
+            .any(|m| matches!(m, SettingsDiscoveryMethod::TcpProbe));
+    let has_icmp = is_all
+        || discovery_methods
+            .iter()
+            .any(|m| matches!(m, SettingsDiscoveryMethod::IcmpPing));
+
+    let discovery_label = text("Discovery Methods").color(TEXT_MUTED).size(11);
+    let discovery_all = checkbox("All", is_all)
+        .on_toggle(|v| Message::SettingsDiscoveryMethodToggled("all".to_string(), v))
+        .size(14);
+    let discovery_arp = checkbox("ARP Table", has_arp)
+        .on_toggle(|v| Message::SettingsDiscoveryMethodToggled("arp".to_string(), v))
+        .size(14);
+    let discovery_tcp = checkbox("TCP Probe", has_tcp)
+        .on_toggle(|v| Message::SettingsDiscoveryMethodToggled("tcp_probe".to_string(), v))
+        .size(14);
+    let discovery_icmp = checkbox("ICMP Ping", has_icmp)
+        .on_toggle(|v| Message::SettingsDiscoveryMethodToggled("icmp".to_string(), v))
+        .size(14);
+
     let scan_config_card = widgets::card(
         Some("Scan Configuration"),
         column![
@@ -147,6 +208,26 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
             ]
             .spacing(12),
             scan_ports_check,
+            row![
+                column![
+                    text("Timing Template").color(TEXT_MUTED).size(11),
+                    timing_template_picker,
+                ]
+                .spacing(2)
+                .width(Length::FillPortion(1)),
+                column![
+                    text("Web Audit Profile").color(TEXT_MUTED).size(11),
+                    web_audit_profile_picker,
+                ]
+                .spacing(2)
+                .width(Length::FillPortion(1)),
+            ]
+            .spacing(12),
+            active_checks_check,
+            discovery_label,
+            row![discovery_all, discovery_arp, discovery_tcp, discovery_icmp]
+                .spacing(12)
+                .align_y(Alignment::Center),
         ]
         .spacing(10),
     );

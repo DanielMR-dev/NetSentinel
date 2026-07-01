@@ -80,7 +80,7 @@ fn generate_icmp_identifier() -> u16 {
 /// * `Ok(Some(ttl))` - Host is alive and responded, returning the packet's TTL
 /// * `Ok(None)` - Timeout or host unreachable
 /// * `Err(ScanError)` - Socket creation or send failure
-fn ping_host_blocking(ip: Ipv4Addr, timeout_ms: u64) -> Result<Option<u8>, ScanError> {
+pub(crate) fn ping_host_blocking(ip: Ipv4Addr, timeout_ms: u64) -> Result<Option<u8>, ScanError> {
     let timeout = Duration::from_millis(timeout_ms);
 
     // Create raw ICMP socket

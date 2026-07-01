@@ -3,6 +3,8 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
+use futures::stream::{self, StreamExt};
+
 use super::context::{wait_if_paused, PipelineContext};
 use crate::error::ScanError;
 use crate::events::AppEvent;
@@ -54,7 +56,25 @@ pub async fn stage_enrichment(
             }
 
             // Read next device from Port Scan Stage
-            Some(mut device) = in_rx.recv() => {
+            maybe_device = in_rx.recv() => {
+                let mut device = match maybe_device {
+                    Some(device) => device,
+                    None => {
+                        while let Some(res) = join_set.join_next().await {
+                            if let Ok(Ok(device)) = res {
+                                if out_tx.send(device).await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                        if *cancel_rx.borrow() {
+                            join_set.abort_all();
+                            return Err(ScanError::Cancelled);
+                        }
+                        break;
+                    }
+                };
+
                 wait_if_paused(&mut pause_rx).await;
 
                 if *cancel_rx.borrow() {
@@ -63,7 +83,7 @@ pub async fn stage_enrichment(
                 }
 
                 let ctx_c = ctx.clone();
-                let web_profile = web_audit_profile.clone();
+                let web_profile = web_audit_profile;
                 let run_active = enable_active_checks;
 
                 join_set.spawn(async move {
@@ -94,7 +114,11 @@ pub async fn stage_enrichment(
                     // 2. Banner Grabbing & TLS Analysis
                     let open_banner_ports: Vec<u16> = device.ports
                         .iter()
-                        .filter(|p| p.state == PortState::Open && p.protocol == "tcp" && BANNER_PORTS.contains(&p.number))
+                        .filter(|p| {
+                            p.state == PortState::Open
+                                && p.protocol == "tcp"
+                                && BANNER_PORTS.contains(&p.number)
+                        })
                         .map(|p| p.number)
                         .collect();
 
@@ -102,64 +126,93 @@ pub async fn stage_enrichment(
                         let grabber = Arc::new(BannerGrabber::new(timeout));
                         let mut banners = Vec::new();
 
-                        for port in open_banner_ports {
-                            // Acquire enrichment semaphore permit
-                            let permit = ctx_c.enrichment_semaphore.clone().acquire_owned().await;
-                            let grabber_c = grabber.clone();
-                            let ip = device.ip.clone();
+                        let concurrency = ctx_c
+                            .enrichment_semaphore
+                            .available_permits()
+                            .max(1);
 
-                            // Run banner grab + optional TLS analysis in a blocking-safe manner
-                            let banner_res = tokio::spawn(async move {
-                                let _permit = permit; // hold permit during network I/O
-                                let mut b_res = grabber_c.grab_banner(&ip, port).await.ok();
-                                if let Some(ref mut b) = b_res {
+                        let mut banner_stream = stream::iter(open_banner_ports)
+                            .map(|port| {
+                                let sem = ctx_c.enrichment_semaphore.clone();
+                                let grabber = grabber.clone();
+                                let ip = device.ip.clone();
+
+                                async move {
+                                    let _permit = sem.acquire_owned().await.ok()?;
+                                    let mut b_res = grabber.grab_banner(&ip, port).await.ok()?;
                                     if is_tls_port(port) {
                                         if let Ok(tls) = analyze_tls(&ip, port, timeout).await {
-                                            b.tls_info = Some(tls);
+                                            b_res.tls_info = Some(tls);
                                         }
                                     }
+                                    Some(b_res)
                                 }
-                                b_res
-                            }).await.ok().flatten();
+                            })
+                            .buffer_unordered(concurrency);
 
+                        while let Some(banner_res) = banner_stream.next().await {
                             if let Some(b) = banner_res {
                                 let _ = ctx_c.event_tx.send(AppEvent::BannerFound(b.clone()));
                                 banners.push(b);
                             }
                         }
+
                         device.banner_results = banners;
                     }
 
                     // 3. Web Auditing
                     if let Some(profile) = web_profile {
-                        let mut web_audits = Vec::new();
-                        for port in &device.ports {
-                            if port.state == PortState::Open && (port.number == 80 || port.number == 443 || port.number == 8080 || port.number == 8443) {
-                                let is_https = port.number == 443 || port.number == 8443;
-                                let permit = ctx_c.enrichment_semaphore.clone().acquire_owned().await;
-                                let ip = device.ip.clone();
-                                let port_num = port.number;
+                        let web_ports: Vec<(u16, bool)> = device
+                            .ports
+                            .iter()
+                            .filter(|p| {
+                                p.state == PortState::Open
+                                    && (p.number == 80
+                                        || p.number == 443
+                                        || p.number == 8080
+                                        || p.number == 8443)
+                            })
+                            .map(|p| {
+                                let is_https = p.number == 443 || p.number == 8443;
+                                (p.number, is_https)
+                            })
+                            .collect();
 
-                                let audit_res = tokio::spawn(async move {
-                                    let _permit = permit;
-                                    audit_web_service(&ip, port_num, is_https, profile).await.ok()
-                                }).await.ok().flatten();
+                        if !web_ports.is_empty() {
+                            let mut web_audits = Vec::new();
 
+                            let concurrency = ctx_c
+                                .enrichment_semaphore
+                                .available_permits()
+                                .max(1);
+
+                            let mut audit_stream = stream::iter(web_ports)
+                                .map(|(port_num, is_https)| {
+                                    let sem = ctx_c.enrichment_semaphore.clone();
+                                    let ip = device.ip.clone();
+                                    let profile = profile.clone();
+
+                                    async move {
+                                        let _permit = sem.acquire_owned().await.ok()?;
+                                        audit_web_service(&ip, port_num, is_https, profile)
+                                            .await
+                                            .ok()
+                                    }
+                                })
+                                .buffer_unordered(concurrency);
+
+                            while let Some(audit_res) = audit_stream.next().await {
                                 if let Some(audit) = audit_res {
                                     web_audits.push(audit);
                                 }
                             }
+
+                            device.web_audits = web_audits;
                         }
-                        device.web_audits = web_audits;
                     }
 
                     // 4. Active Checks
                     if run_active {
-                        let open_ports: Vec<u16> = device.ports
-                            .iter()
-                            .filter(|p| p.state == PortState::Open)
-                            .map(|p| p.number)
-                            .collect();
                         let active_res = run_active_checks(&device.ip, &open_ports).await;
                         device.active_checks = active_res;
                     }
@@ -168,11 +221,6 @@ pub async fn stage_enrichment(
                 });
             }
 
-            else => {
-                if join_set.is_empty() {
-                    break;
-                }
-            }
         }
     }
 

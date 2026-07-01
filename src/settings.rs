@@ -11,6 +11,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
 use crate::error::ScanError;
+use crate::network::timing::TimingTemplate;
+use crate::network::web_audit::WebAuditProfile;
 
 /// Discovery method enumeration - serialized as lowercase strings
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -33,7 +35,7 @@ impl Default for SettingsDiscoveryMethod {
 
 /// Scan configuration for a settings profile
 #[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct ScanConfig {
     /// Default CIDR block for scanning (e.g., "192.168.1.0/24")
     pub default_cidr: String,
@@ -51,6 +53,12 @@ pub struct ScanConfig {
     pub discovery_methods: Vec<SettingsDiscoveryMethod>,
     /// Number of retries for failed connections
     pub retry_count: u32,
+    /// Scan timing template (Nmap-style T0-T5)
+    pub timing_template: TimingTemplate,
+    /// Web audit profile (Safe / Aggressive)
+    pub web_audit_profile: WebAuditProfile,
+    /// Whether to run active vulnerability checks
+    pub run_active_checks: bool,
 }
 
 impl Default for ScanConfig {
@@ -64,13 +72,54 @@ impl Default for ScanConfig {
             selected_ports: Vec::new(),
             discovery_methods: vec![SettingsDiscoveryMethod::All],
             retry_count: 1,
+            timing_template: TimingTemplate::Normal,
+            web_audit_profile: WebAuditProfile::Safe,
+            run_active_checks: false,
+        }
+    }
+}
+
+impl ScanConfig {
+    /// Expand the configured discovery methods into the lowercase method strings
+    /// used by the scan pipeline.
+    ///
+    /// `All` expands to the default set; duplicates are removed.
+    pub fn effective_discovery_methods(&self) -> Vec<String> {
+        let mut methods = Vec::new();
+        for method in &self.discovery_methods {
+            match method {
+                SettingsDiscoveryMethod::All => {
+                    methods.push("arp".to_string());
+                    methods.push("tcp_probe".to_string());
+                    methods.push("icmp".to_string());
+                }
+                SettingsDiscoveryMethod::ArpTable => methods.push("arp".to_string()),
+                SettingsDiscoveryMethod::TcpProbe => methods.push("tcp_probe".to_string()),
+                SettingsDiscoveryMethod::IcmpPing => methods.push("icmp".to_string()),
+            }
+        }
+        methods.sort();
+        methods.dedup();
+        methods
+    }
+
+    /// Return the selected ports if port scanning is enabled, otherwise an empty list.
+    pub fn effective_ports(&self) -> Vec<u16> {
+        if self.scan_ports_enabled {
+            if self.selected_ports.is_empty() {
+                crate::network::host_discovery::DEFAULT_PORTS.to_vec()
+            } else {
+                self.selected_ports.clone()
+            }
+        } else {
+            Vec::new()
         }
     }
 }
 
 /// UI preferences for a settings profile
 #[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct UiPreferences {
     /// Refresh rate in milliseconds for UI updates
     pub refresh_rate_ms: u64,
@@ -145,6 +194,7 @@ impl SettingsProfile {
 
 /// Container for all profiles
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(default)]
 pub struct ProfilesContainer {
     /// Map of profile ID to profile
     pub profiles: HashMap<String, SettingsProfile>,

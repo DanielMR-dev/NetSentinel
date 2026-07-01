@@ -51,13 +51,14 @@ impl ScanSessionStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 pub struct StoredScanConfig {
     pub timeout_ms: u64,
     pub scan_ports: bool,
     pub ports: Vec<u16>,
     pub max_concurrent_hosts: Option<u32>,
+    pub max_concurrent_ports: Option<u32>,
     pub discovery_methods: Option<Vec<String>>,
     pub retry_count: Option<u8>,
     pub scan_type: String,
@@ -1247,6 +1248,7 @@ mod tests {
                 scan_ports: true,
                 ports: vec![22, 80],
                 max_concurrent_hosts: Some(25),
+                max_concurrent_ports: Some(100),
                 discovery_methods: Some(vec!["tcp_probe".to_string()]),
                 retry_count: Some(1),
                 scan_type: "connect".to_string(),
