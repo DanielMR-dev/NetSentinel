@@ -73,8 +73,10 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         container(content)
             .padding(0)
             .width(Length::Fill)
-            .height(Length::Fill),
+            .height(Length::Shrink),
     )
+    .width(Length::Fill)
+    .height(Length::Fill)
     .into()
 }
 
