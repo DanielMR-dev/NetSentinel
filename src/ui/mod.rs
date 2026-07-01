@@ -29,7 +29,7 @@ use crate::network::web_audit::WebAuditProfile;
 use crate::scan_store::StoredDeviceSummary;
 use crate::settings::{SettingsDiscoveryMethod, SettingsProfile};
 use crate::state::SharedScanState;
-use crate::types::{Device, Finding, FindingSeverity, ScanType};
+use crate::types::{Device, Finding, FindingSeverity, ScanType, TopologyGraph};
 
 pub mod theme;
 pub mod views;
@@ -191,6 +191,10 @@ pub enum Message {
     BaselineNameChanged(String),
     BaselineDescriptionChanged(String),
 
+    // Topology
+    TopologyRefresh,
+    TopologyLoaded(Result<TopologyGraph, String>),
+
     // Export
     ExportCsv,
     ExportJson,
@@ -296,6 +300,11 @@ pub struct NetSentinelApp {
     baseline_name: String,
     baseline_description: String,
 
+    // Topology
+    topology_graph: Option<TopologyGraph>,
+    topology_loading: bool,
+    topology_error: Option<String>,
+
     // CVE
     cve_alerts: Vec<CveMatch>,
 
@@ -360,6 +369,9 @@ impl NetSentinelApp {
             baseline_diff: None,
             baseline_name: String::new(),
             baseline_description: String::new(),
+            topology_graph: None,
+            topology_loading: false,
+            topology_error: None,
             cve_alerts: Vec::new(),
             status_message: None,
             loading: true,
@@ -639,7 +651,10 @@ impl NetSentinelApp {
         match message {
             // ── Navigation ──────────────────────────────────────────────
             Message::NavigateTo(page) => {
-                self.current_page = page;
+                self.current_page = page.clone();
+                if page == Page::Topology {
+                    return load_topology_graph(self.scan_state.clone());
+                }
                 Task::none()
             }
 
@@ -1448,6 +1463,27 @@ impl NetSentinelApp {
                 Task::none()
             }
 
+            // ── Topology ────────────────────────────────────────────────
+            Message::TopologyRefresh => {
+                self.topology_loading = true;
+                self.topology_error = None;
+                load_topology_graph(self.scan_state.clone())
+            }
+
+            Message::TopologyLoaded(result) => {
+                self.topology_loading = false;
+                match result {
+                    Ok(graph) => {
+                        self.topology_graph = Some(graph);
+                        self.topology_error = None;
+                    }
+                    Err(e) => {
+                        self.topology_error = Some(e);
+                    }
+                }
+                Task::none()
+            }
+
             // ── Export ──────────────────────────────────────────────────
             Message::ExportCsv => {
                 let devices = self.discovered_devices.clone();
@@ -1561,7 +1597,7 @@ impl NetSentinelApp {
         let content: Element<'_, Message> = match self.current_page {
             Page::Dashboard => views::dashboard::view(self),
             Page::Scan => views::scan::view(self),
-            Page::Topology => self.view_topology_placeholder(),
+            Page::Topology => views::topology::view(self),
             Page::Settings => views::settings::view(self),
             Page::History => views::history::view(self),
             Page::Baseline => views::baseline::view(self),
@@ -1696,28 +1732,6 @@ impl NetSentinelApp {
         } else {
             None
         }
-    }
-
-    /// Placeholder view for the Topology page.
-    ///
-    /// Renders a non-breaking placeholder panel while the topology graph
-    /// visualization is being implemented.
-    fn view_topology_placeholder(&self) -> Element<'_, Message> {
-        let title = text("Network Topology").size(24).color(theme::TEXT);
-
-        let subtitle = text(
-            "Topology visualization is coming soon. This page will display an \
-             interactive graph of discovered devices and their relationships.",
-        )
-        .size(14)
-        .color(theme::TEXT_MUTED);
-
-        column![title, subtitle]
-            .spacing(16)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(iced::Alignment::Center)
-            .into()
     }
 
     /// Render the status bar at the bottom
@@ -1995,6 +2009,18 @@ fn load_baselines() -> Task<Message> {
                 .map_err(|e| e.to_string())
         },
         Message::BaselinesLoaded,
+    )
+}
+
+/// Load the current topology graph from shared scan state.
+fn load_topology_graph(state: Arc<SharedScanState>) -> Task<Message> {
+    Task::perform(
+        async move {
+            crate::commands::build_current_topology(state)
+                .await
+                .map_err(|e| e.to_string())
+        },
+        Message::TopologyLoaded,
     )
 }
 

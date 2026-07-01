@@ -16,6 +16,7 @@ pub mod scan_pipeline;
 pub mod scan_store;
 pub mod scheduler;
 pub mod settings;
+pub mod topology;
 
 use serde::Serialize;
 
@@ -97,3 +98,6 @@ pub use baseline::{
 
 // Re-export privilege command
 pub use privilege::check_privilege_status;
+
+// Re-export topology command
+pub use topology::build_current_topology;

@@ -665,6 +665,130 @@ mod finding_tests {
     }
 }
 
+/// Classification of a topology node for rendering and analysis.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum NodeKind {
+    Unknown,
+    LocalHost,
+    Gateway,
+    Router,
+    Server,
+    Endpoint,
+    Peripheral,
+    Virtual,
+}
+
+impl Default for NodeKind {
+    fn default() -> Self {
+        NodeKind::Unknown
+    }
+}
+
+/// Classification of a topology edge for rendering and analysis.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum EdgeKind {
+    Unknown,
+    GatewayLink,
+    DirectLink,
+    Inferred,
+}
+
+impl Default for EdgeKind {
+    fn default() -> Self {
+        EdgeKind::Unknown
+    }
+}
+
+/// Source of topology information.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum TopologySource {
+    Discovery,
+    ArpTable,
+    NetworkInfo,
+    FlowObserved,
+    Inferred,
+}
+
+impl Default for TopologySource {
+    fn default() -> Self {
+        TopologySource::Inferred
+    }
+}
+
+/// A single node in the topology graph.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyNode {
+    /// Stable node identifier (typically the device IP).
+    pub id: String,
+    /// Human-readable label.
+    pub label: String,
+    /// Classified node kind.
+    pub kind: NodeKind,
+    /// Source subsystem that produced this node.
+    pub source: TopologySource,
+    /// Underlying device data, if available.
+    pub device: Option<Device>,
+    /// Optional grouping/hierarchy identifier.
+    pub group: Option<String>,
+}
+
+/// A single edge in the topology graph.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyEdge {
+    /// Source node identifier.
+    pub source: String,
+    /// Target node identifier.
+    pub target: String,
+    /// Classified edge kind.
+    pub kind: EdgeKind,
+}
+
+/// A graph representation of the discovered network topology.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyGraph {
+    /// Nodes in the topology.
+    pub nodes: Vec<TopologyNode>,
+    /// Edges connecting nodes.
+    pub edges: Vec<TopologyEdge>,
+    /// Timestamp when the graph was generated.
+    pub generated_at: i64,
+}
+
+impl TopologyGraph {
+    /// Create an empty topology graph.
+    pub fn new() -> Self {
+        Self {
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            generated_at: chrono::Utc::now().timestamp(),
+        }
+    }
+
+    /// Add a node to the graph if it does not already exist.
+    pub fn add_node(&mut self, node: TopologyNode) {
+        if !self.nodes.iter().any(|n| n.id == node.id) {
+            self.nodes.push(node);
+        }
+    }
+
+    /// Add an edge to the graph if it does not already exist.
+    pub fn add_edge(&mut self, edge: TopologyEdge) {
+        if !self
+            .edges
+            .iter()
+            .any(|e| e.source == edge.source && e.target == edge.target && e.kind == edge.kind)
+        {
+            self.edges.push(edge);
+        }
+    }
+}
+
 /// Scan response when starting a scan
 #[derive(Serialize, Deserialize)]
 pub struct ScanResponse {
