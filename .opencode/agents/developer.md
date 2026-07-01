@@ -2,7 +2,6 @@
 name: Developer
 description: Senior Rust developer. Implements safe, highly concurrent network scanning logic, database engines, and Iced widgets, layouts, theme configurations, and update handlers following the architectural plan.
 mode: subagent
-model: opencode-go/kimi-k2.7-code
 temperature: 0.4
 ---
 

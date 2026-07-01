@@ -2,7 +2,6 @@
 name: Reviewer
 description: Expert Rust security, systems, and GUI reviewer. Audits code for panics, thread blocking, deadlocks, unsafe memory, main-thread GUI blocking, layout lag, theme consistency, and best practices.
 mode: subagent
-model: opencode-go/kimi-k2.7-code
 temperature: 0.2
 permission:
   edit: deny

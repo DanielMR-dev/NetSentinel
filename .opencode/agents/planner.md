@@ -2,7 +2,6 @@
 name: Planner
 description: Senior Rust systems and GUI architect. Plans network protocols, asynchronous execution (Tokio), database models, robust data structures, UI layouts, state management, and communication flow.
 mode: subagent
-model: opencode-go/glm-5.2
 temperature: 0.1
 permission:
   edit: deny

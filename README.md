@@ -2,13 +2,6 @@
 
 NetSentinel is a cross-platform desktop application for network discovery, security auditing, and infrastructure monitoring. Built for Blue Team, Purple Team, and SOC analysts, it combines a high-performance Rust scanning engine with a modern native Rust GUI (Iced) to deliver real-time network intelligence without leaving your desktop.
 
-## Project Status
-
-> **Milestone 0 — Foundation & Documentation**
->
-> NetSentinel is under active development. The core application shell, async scanning pipeline, settings/history/baseline persistence, and basic TCP-based discovery are in place. Many advanced scanners and reporting features exist as modules but are considered **experimental** until they have full end-to-end validation and automated test coverage.
->
-> Current focus: stabilize host discovery and port scanning, harden privilege-aware fallbacks, and expand automated tests before declaring broader features production-ready.
 
 ## Features
 
@@ -96,16 +89,16 @@ The project follows a unified architecture within a single Rust binary, eliminat
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         NetSentinel Binary                          │
 │                                                                     │
-│  ┌──────────────┐     ┌──────────────────┐     ┌────────────────┐  │
-│  │   Iced GUI    │     │  Command Layer   │     │ Network Engine │  │
-│  │  (ui/mod.rs)  │────>│ (commands/*.rs)  │────>│ (network/*.rs) │  │
-│  │               │<────│                  │<────│                │  │
-│  │  Model        │     │  Async functions │     │  Scanners      │  │
-│  │  Message      │     │  operating on    │     │  Banner grab   │  │
-│  │  update()     │     │  SharedScanState │     │  CVE matching  │  │
-│  │  view()       │     │                  │     │  TLS analysis  │  │
-│  │  subscription │     │                  │     │  OS fingerprint│  │
-│  └──────┬───────┘     └────────┬─────────┘     └───────┬────────┘  │
+│  ┌──────────────┐     ┌──────────────────┐     ┌────────────────┐   │
+│  │   Iced GUI   │     │  Command Layer   │     │ Network Engine │   │
+│  │  (ui/mod.rs) │────>│ (commands/*.rs)  │────>│ (network/*.rs) │   │
+│  │              │<────│                  │<────│                │   │
+│  │  Model       │     │  Async functions │     │  Scanners      │   │
+│  │  Message     │     │  operating on    │     │  Banner grab   │   │
+│  │  update()    │     │  SharedScanState │     │  CVE matching  │   │
+│  │  view()      │     │                  │     │  TLS analysis  │   │
+│  │  subscription│     │                  │     │  OS fingerprint│   │
+│  └──────┬───────┘     └────────┬─────────┘     └────────┬───────┘   │
 │         │                      │                        │           │
 │         │              ┌───────┴────────┐               │           │
 │         │              │ Storage Layer  │               │           │
@@ -122,7 +115,7 @@ The project follows a unified architecture within a single Rust binary, eliminat
 │                                                                     │
 │  ┌───────────────────────────────────────────────────────────────┐  │
 │  │              IPC Server (ipc.rs)                              │  │
-│  │  gRPC over Unix Domain Socket (/tmp/nexus_central.sock)      │  │
+│  │  gRPC over Unix Domain Socket (/tmp/nexus_central.sock)       │  │
 │  │  Receives: HostDiscovered, SecurityAlert, CommandTrigger      │  │
 │  └───────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────┘
