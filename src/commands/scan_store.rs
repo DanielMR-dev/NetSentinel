@@ -4,10 +4,10 @@ use crate::commands::settings::get_config_dir;
 use crate::error::ScanError;
 use crate::network::sanitize;
 use crate::scan_store::{
-    clamp_limit, FindingSummary, NewScanSession, Page, ScanSessionStatus, ScanSessionSummary,
+    clamp_limit, FindingSummary, Page, ScanSession, ScanSessionStatus, ScanSessionSummary,
     ScanStore, StoredDeviceSummary,
 };
-use crate::types::{Device, Finding, FindingSeverity};
+use crate::types::{Device, Finding, FindingSeverity, Port};
 
 fn create_scan_store() -> Result<ScanStore, ScanError> {
     Ok(ScanStore::new(get_config_dir()?))
@@ -17,7 +17,7 @@ pub async fn initialize_scan_store() -> Result<(), ScanError> {
     create_scan_store()?.initialize().await
 }
 
-pub async fn begin_scan_session(session: NewScanSession) -> Result<String, ScanError> {
+pub async fn create_scan_session(session: ScanSession) -> Result<String, ScanError> {
     let _id = sanitize::validate_id(&session.id)?;
     let _cidr = sanitize::validate_cidr(&session.cidr)?;
     if session.total_hosts == 0 {
@@ -25,7 +25,7 @@ pub async fn begin_scan_session(session: NewScanSession) -> Result<String, ScanE
             "Scan session total_hosts must be greater than zero".to_string(),
         ));
     }
-    create_scan_store()?.begin_session(session).await
+    create_scan_store()?.create_scan_session(session).await
 }
 
 pub async fn upsert_scan_device(scan_id: String, device: Device) -> Result<(), ScanError> {
@@ -38,14 +38,30 @@ pub async fn upsert_scan_device(scan_id: String, device: Device) -> Result<(), S
     create_scan_store()?.upsert_device(scan_id, device).await
 }
 
-pub async fn upsert_scan_finding(scan_id: String, finding: Finding) -> Result<(), ScanError> {
+pub async fn upsert_scan_port(
+    scan_id: String,
+    device_ip: String,
+    port: Port,
+) -> Result<(), ScanError> {
+    let _id = sanitize::validate_id(&scan_id)?;
+    if device_ip.trim().is_empty() {
+        return Err(ScanError::InvalidInput(
+            "Cannot persist port without a device IP address".to_string(),
+        ));
+    }
+    create_scan_store()?
+        .upsert_port(scan_id, device_ip, port)
+        .await
+}
+
+pub async fn insert_scan_finding(scan_id: String, finding: Finding) -> Result<(), ScanError> {
     let _id = sanitize::validate_id(&scan_id)?;
     if finding.id.trim().is_empty() || finding.ip.trim().is_empty() {
         return Err(ScanError::InvalidInput(
             "Cannot persist finding without an ID and IP address".to_string(),
         ));
     }
-    create_scan_store()?.upsert_finding(scan_id, finding).await
+    create_scan_store()?.insert_finding(scan_id, finding).await
 }
 
 pub async fn update_scan_progress(
@@ -72,7 +88,7 @@ pub async fn complete_scan_session(
 ) -> Result<(), ScanError> {
     let _id = sanitize::validate_id(&scan_id)?;
     create_scan_store()?
-        .complete_session(scan_id, status, duration_ms, error_message)
+        .complete_scan_session(scan_id, status, duration_ms, error_message)
         .await
 }
 
@@ -92,7 +108,7 @@ pub async fn list_scan_devices(
 ) -> Result<Page<StoredDeviceSummary>, ScanError> {
     let _id = sanitize::validate_id(&scan_id)?;
     create_scan_store()?
-        .list_devices(scan_id, clamp_limit(limit), offset)
+        .list_devices_page(scan_id, clamp_limit(limit), offset)
         .await
 }
 
@@ -107,11 +123,6 @@ pub async fn get_stored_scan_device(
         ));
     }
     create_scan_store()?.get_device(scan_id, ip).await
-}
-
-pub async fn load_scan_devices(scan_id: String) -> Result<Vec<Device>, ScanError> {
-    let _id = sanitize::validate_id(&scan_id)?;
-    create_scan_store()?.load_all_devices(scan_id).await
 }
 
 pub async fn list_scan_findings_page(

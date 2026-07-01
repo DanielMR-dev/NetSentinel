@@ -11,10 +11,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::ScanError;
 use crate::types::{
-    Device, Finding, FindingCategory, FindingConfidence, FindingSeverity, FindingSource, PortState,
+    Device, DeviceStatus, Finding, FindingCategory, FindingConfidence, FindingSeverity,
+    FindingSource, Port, PortState,
 };
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 const MAX_PAGE_LIMIT: u32 = 500;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -65,15 +66,20 @@ pub struct StoredScanConfig {
     pub active_checks_enabled: bool,
 }
 
+/// Unified scan session input type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NewScanSession {
+pub struct ScanSession {
     pub id: String,
     pub cidr: String,
     pub total_hosts: u32,
     pub config: StoredScanConfig,
     pub started_at: i64,
 }
+
+/// Backward-compatible alias for code that still references `NewScanSession`.
+#[deprecated(note = "Use ScanSession instead")]
+pub type NewScanSession = ScanSession;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -155,15 +161,19 @@ impl ScanStore {
             .map_err(|e| ScanError::ScanStoreError(format!("Scan store init task failed: {}", e)))?
     }
 
-    pub async fn begin_session(&self, session: NewScanSession) -> Result<String, ScanError> {
+    pub async fn create_scan_session(&self, session: ScanSession) -> Result<String, ScanError> {
         let store = self.clone();
-        tokio::task::spawn_blocking(move || store.begin_session_blocking(&session))
+        tokio::task::spawn_blocking(move || store.create_session_blocking(&session))
             .await
             .map_err(|e| {
-                ScanError::ScanStoreError(format!("Scan session begin task failed: {}", e))
+                ScanError::ScanStoreError(format!("Scan session create task failed: {}", e))
             })?
     }
 
+    /// Upsert device metadata and snapshot.
+    ///
+    /// This does **not** authoritatively replace ports or findings; use
+    /// [`ScanStore::upsert_port`] and [`ScanStore::insert_finding`] for those.
     pub async fn upsert_device(&self, scan_id: String, device: Device) -> Result<(), ScanError> {
         let store = self.clone();
         tokio::task::spawn_blocking(move || store.upsert_device_blocking(&scan_id, &device))
@@ -173,12 +183,28 @@ impl ScanStore {
             })?
     }
 
-    pub async fn upsert_finding(&self, scan_id: String, finding: Finding) -> Result<(), ScanError> {
+    /// Upsert a single port for a device.
+    pub async fn upsert_port(
+        &self,
+        scan_id: String,
+        device_ip: String,
+        port: Port,
+    ) -> Result<(), ScanError> {
         let store = self.clone();
-        tokio::task::spawn_blocking(move || store.upsert_finding_blocking(&scan_id, &finding))
+        tokio::task::spawn_blocking(move || store.upsert_port_blocking(&scan_id, &device_ip, &port))
             .await
             .map_err(|e| {
-                ScanError::ScanStoreError(format!("Scan finding upsert task failed: {}", e))
+                ScanError::ScanStoreError(format!("Scan port upsert task failed: {}", e))
+            })?
+    }
+
+    /// Insert a single finding.
+    pub async fn insert_finding(&self, scan_id: String, finding: Finding) -> Result<(), ScanError> {
+        let store = self.clone();
+        tokio::task::spawn_blocking(move || store.insert_finding_blocking(&scan_id, &finding))
+            .await
+            .map_err(|e| {
+                ScanError::ScanStoreError(format!("Scan finding insert task failed: {}", e))
             })?
     }
 
@@ -198,7 +224,7 @@ impl ScanStore {
         })?
     }
 
-    pub async fn complete_session(
+    pub async fn complete_scan_session(
         &self,
         scan_id: String,
         status: ScanSessionStatus,
@@ -228,7 +254,7 @@ impl ScanStore {
             })?
     }
 
-    pub async fn list_devices(
+    pub async fn list_devices_page(
         &self,
         scan_id: String,
         limit: u32,
@@ -252,15 +278,6 @@ impl ScanStore {
             .await
             .map_err(|e| {
                 ScanError::ScanStoreError(format!("Scan device load task failed: {}", e))
-            })?
-    }
-
-    pub async fn load_all_devices(&self, scan_id: String) -> Result<Vec<Device>, ScanError> {
-        let store = self.clone();
-        tokio::task::spawn_blocking(move || store.load_all_devices_blocking(&scan_id))
-            .await
-            .map_err(|e| {
-                ScanError::ScanStoreError(format!("Scan devices load task failed: {}", e))
             })?
     }
 
@@ -370,12 +387,49 @@ impl ScanStore {
                 FOREIGN KEY (scan_id, device_ip) REFERENCES scan_devices(scan_id, ip) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS scan_services (
+                scan_id TEXT NOT NULL,
+                device_ip TEXT NOT NULL,
+                port INTEGER NOT NULL,
+                protocol TEXT NOT NULL,
+                name TEXT,
+                product TEXT,
+                version TEXT,
+                info TEXT,
+                service_json TEXT NOT NULL,
+                PRIMARY KEY (scan_id, device_ip, port, protocol),
+                FOREIGN KEY (scan_id, device_ip) REFERENCES scan_devices(scan_id, ip) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS scan_web_audits (
+                scan_id TEXT NOT NULL,
+                device_ip TEXT NOT NULL,
+                port INTEGER NOT NULL,
+                protocol TEXT NOT NULL,
+                url TEXT NOT NULL,
+                audit_json TEXT NOT NULL,
+                PRIMARY KEY (scan_id, device_ip, port, protocol, url),
+                FOREIGN KEY (scan_id, device_ip) REFERENCES scan_devices(scan_id, ip) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS scan_metadata (
+                scan_id TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value_json TEXT NOT NULL,
+                PRIMARY KEY (scan_id, key),
+                FOREIGN KEY (scan_id) REFERENCES scan_sessions(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_scan_sessions_started_at
                 ON scan_sessions(started_at DESC);
             CREATE INDEX IF NOT EXISTS idx_scan_devices_scan_id
                 ON scan_devices(scan_id, ip);
             CREATE INDEX IF NOT EXISTS idx_scan_findings_scan_id
-                ON scan_findings(scan_id, severity);",
+                ON scan_findings(scan_id, severity);
+            CREATE INDEX IF NOT EXISTS idx_scan_services_scan_id
+                ON scan_services(scan_id, device_ip);
+            CREATE INDEX IF NOT EXISTS idx_scan_web_audits_scan_id
+                ON scan_web_audits(scan_id, device_ip);",
         )
         .map_err(|e| ScanError::ScanStoreError(format!("Failed to initialize schema: {}", e)))?;
 
@@ -383,7 +437,7 @@ impl ScanStore {
         Ok(())
     }
 
-    fn begin_session_blocking(&self, session: &NewScanSession) -> Result<String, ScanError> {
+    fn create_session_blocking(&self, session: &ScanSession) -> Result<String, ScanError> {
         self.initialize_blocking()?;
         let conn = self.open_connection()?;
         let config_json = serde_json::to_string(&session.config).map_err(|e| {
@@ -404,7 +458,7 @@ impl ScanStore {
                 session.started_at,
             ],
         )
-        .map_err(|e| ScanError::ScanStoreError(format!("Failed to begin scan session: {}", e)))?;
+        .map_err(|e| ScanError::ScanStoreError(format!("Failed to create scan session: {}", e)))?;
 
         Ok(session.id.clone())
     }
@@ -430,6 +484,8 @@ impl ScanStore {
         )?;
         let finding_count = usize_to_u32(device.findings.len(), "finding count")?;
 
+        // Upsert only the device-level metadata and snapshot. Ports and findings
+        // are managed through standalone upsert_port / insert_finding calls.
         tx.execute(
             "INSERT INTO scan_devices
                 (scan_id, ip, mac, hostname, vendor, os, status, port_count, open_port_count,
@@ -465,45 +521,6 @@ impl ScanStore {
         )
         .map_err(|e| ScanError::ScanStoreError(format!("Failed to upsert scan device: {}", e)))?;
 
-        tx.execute(
-            "DELETE FROM scan_ports WHERE scan_id = ?1 AND device_ip = ?2",
-            params![scan_id, device.ip],
-        )
-        .map_err(|e| ScanError::ScanStoreError(format!("Failed to refresh scan ports: {}", e)))?;
-
-        for port in &device.ports {
-            let port_json = serde_json::to_string(port).map_err(|e| {
-                ScanError::SerializationError(format!("Failed to serialize port: {}", e))
-            })?;
-            tx.execute(
-                "INSERT INTO scan_ports
-                    (scan_id, device_ip, number, protocol, service, state, port_json)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    scan_id,
-                    device.ip,
-                    port.number,
-                    port.protocol,
-                    port.service,
-                    port_state_to_str(&port.state),
-                    port_json,
-                ],
-            )
-            .map_err(|e| ScanError::ScanStoreError(format!("Failed to insert scan port: {}", e)))?;
-        }
-
-        tx.execute(
-            "DELETE FROM scan_findings WHERE scan_id = ?1 AND device_ip = ?2",
-            params![scan_id, device.ip],
-        )
-        .map_err(|e| {
-            ScanError::ScanStoreError(format!("Failed to refresh scan findings: {}", e))
-        })?;
-
-        for finding in &device.findings {
-            upsert_finding_on_connection(&tx, scan_id, finding)?;
-        }
-
         refresh_session_counts(&tx, scan_id)?;
         tx.commit().map_err(|e| {
             ScanError::ScanStoreError(format!("Failed to commit device transaction: {}", e))
@@ -511,14 +528,60 @@ impl ScanStore {
         Ok(())
     }
 
-    fn upsert_finding_blocking(&self, scan_id: &str, finding: &Finding) -> Result<(), ScanError> {
+    fn upsert_port_blocking(
+        &self,
+        scan_id: &str,
+        device_ip: &str,
+        port: &Port,
+    ) -> Result<(), ScanError> {
+        let conn = self.open_connection()?;
+        let tx = conn.unchecked_transaction().map_err(|e| {
+            ScanError::ScanStoreError(format!("Failed to start port transaction: {}", e))
+        })?;
+
+        ensure_device_exists(&tx, scan_id, device_ip)?;
+
+        let port_json = serde_json::to_string(port).map_err(|e| {
+            ScanError::SerializationError(format!("Failed to serialize port: {}", e))
+        })?;
+        tx.execute(
+            "INSERT INTO scan_ports
+                (scan_id, device_ip, number, protocol, service, state, port_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(scan_id, device_ip, number, protocol) DO UPDATE SET
+                service = excluded.service,
+                state = excluded.state,
+                port_json = excluded.port_json",
+            params![
+                scan_id,
+                device_ip,
+                port.number,
+                port.protocol,
+                port.service,
+                port_state_to_str(&port.state),
+                port_json,
+            ],
+        )
+        .map_err(|e| ScanError::ScanStoreError(format!("Failed to upsert scan port: {}", e)))?;
+
+        refresh_device_counts(&tx, scan_id, device_ip)?;
+        refresh_session_counts(&tx, scan_id)?;
+        tx.commit().map_err(|e| {
+            ScanError::ScanStoreError(format!("Failed to commit port transaction: {}", e))
+        })?;
+        Ok(())
+    }
+
+    fn insert_finding_blocking(&self, scan_id: &str, finding: &Finding) -> Result<(), ScanError> {
         let conn = self.open_connection()?;
         let tx = conn.unchecked_transaction().map_err(|e| {
             ScanError::ScanStoreError(format!("Failed to start finding transaction: {}", e))
         })?;
 
+        ensure_device_exists(&tx, scan_id, &finding.ip)?;
         upsert_finding_on_connection(&tx, scan_id, finding)?;
         merge_finding_into_device_snapshot(&tx, scan_id, finding)?;
+        refresh_device_counts(&tx, scan_id, &finding.ip)?;
         refresh_session_counts(&tx, scan_id)?;
         tx.commit().map_err(|e| {
             ScanError::ScanStoreError(format!("Failed to commit finding transaction: {}", e))
@@ -719,6 +782,7 @@ impl ScanStore {
     fn get_device_blocking(&self, scan_id: &str, ip: &str) -> Result<Option<Device>, ScanError> {
         self.initialize_blocking()?;
         let conn = self.open_connection()?;
+
         let device_json: Option<String> = conn
             .query_row(
                 "SELECT device_json FROM scan_devices WHERE scan_id = ?1 AND ip = ?2",
@@ -728,31 +792,14 @@ impl ScanStore {
             .optional()
             .map_err(|e| ScanError::ScanStoreError(format!("Failed to load device: {}", e)))?;
 
-        device_json
-            .map(|json| serde_json::from_str(&json).map_err(ScanError::from))
-            .transpose()
-    }
+        let Some(device_json) = device_json else {
+            return Ok(None);
+        };
 
-    fn load_all_devices_blocking(&self, scan_id: &str) -> Result<Vec<Device>, ScanError> {
-        self.initialize_blocking()?;
-        let conn = self.open_connection()?;
-        let mut stmt = conn
-            .prepare("SELECT device_json FROM scan_devices WHERE scan_id = ?1 ORDER BY ip")
-            .map_err(|e| {
-                ScanError::ScanStoreError(format!("Failed to prepare devices load: {}", e))
-            })?;
-        let rows = stmt
-            .query_map(params![scan_id], |row| row.get::<_, String>(0))
-            .map_err(|e| ScanError::ScanStoreError(format!("Failed to query devices: {}", e)))?;
-
-        let mut devices = Vec::new();
-        for row in rows {
-            let json = row.map_err(|e| {
-                ScanError::ScanStoreError(format!("Failed to read device json: {}", e))
-            })?;
-            devices.push(serde_json::from_str(&json)?);
-        }
-        Ok(devices)
+        let mut device: Device = serde_json::from_str(&device_json)?;
+        device.ports = load_ports_for_device(&conn, scan_id, ip)?;
+        device.findings = load_findings_for_device(&conn, scan_id, ip)?;
+        Ok(Some(device))
     }
 
     fn delete_session_blocking(&self, scan_id: &str) -> Result<(), ScanError> {
@@ -871,6 +918,106 @@ impl ScanStore {
     }
 }
 
+fn ensure_device_exists(
+    conn: &Connection,
+    scan_id: &str,
+    device_ip: &str,
+) -> Result<(), ScanError> {
+    let exists: bool = conn
+        .query_row(
+            "SELECT 1 FROM scan_devices WHERE scan_id = ?1 AND ip = ?2",
+            params![scan_id, device_ip],
+            |_| Ok(true),
+        )
+        .optional()
+        .map_err(|e| ScanError::ScanStoreError(format!("Failed to check device existence: {}", e)))?
+        .is_some();
+
+    if !exists {
+        return Err(ScanError::ScanStoreError(format!(
+            "Device '{}' does not exist in scan '{}'",
+            device_ip, scan_id
+        )));
+    }
+    Ok(())
+}
+
+fn load_ports_for_device(
+    conn: &Connection,
+    scan_id: &str,
+    ip: &str,
+) -> Result<Vec<Port>, ScanError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT port_json FROM scan_ports
+             WHERE scan_id = ?1 AND device_ip = ?2
+             ORDER BY number, protocol",
+        )
+        .map_err(|e| ScanError::ScanStoreError(format!("Failed to prepare ports load: {}", e)))?;
+    let rows = stmt
+        .query_map(params![scan_id, ip], |row| {
+            let json: String = row.get(0)?;
+            serde_json::from_str(&json).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(ScanError::DeserializationError(format!(
+                        "Failed to deserialize port: {}",
+                        e
+                    ))),
+                )
+            })
+        })
+        .map_err(|e| ScanError::ScanStoreError(format!("Failed to query ports: {}", e)))?;
+
+    let mut ports = Vec::new();
+    for row in rows {
+        ports.push(
+            row.map_err(|e| ScanError::ScanStoreError(format!("Failed to read port row: {}", e)))?,
+        );
+    }
+    Ok(ports)
+}
+
+fn load_findings_for_device(
+    conn: &Connection,
+    scan_id: &str,
+    ip: &str,
+) -> Result<Vec<Finding>, ScanError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT finding_json FROM scan_findings
+             WHERE scan_id = ?1 AND device_ip = ?2
+             ORDER BY timestamp DESC",
+        )
+        .map_err(|e| {
+            ScanError::ScanStoreError(format!("Failed to prepare findings load: {}", e))
+        })?;
+    let rows = stmt
+        .query_map(params![scan_id, ip], |row| {
+            let json: String = row.get(0)?;
+            serde_json::from_str(&json).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(ScanError::DeserializationError(format!(
+                        "Failed to deserialize finding: {}",
+                        e
+                    ))),
+                )
+            })
+        })
+        .map_err(|e| ScanError::ScanStoreError(format!("Failed to query findings: {}", e)))?;
+
+    let mut findings = Vec::new();
+    for row in rows {
+        findings.push(row.map_err(|e| {
+            ScanError::ScanStoreError(format!("Failed to read finding row: {}", e))
+        })?);
+    }
+    Ok(findings)
+}
+
 fn upsert_finding_on_connection(
     conn: &Connection,
     scan_id: &str,
@@ -938,20 +1085,14 @@ fn merge_finding_into_device_snapshot(
     let merged_json = serde_json::to_string(&device).map_err(|e| {
         ScanError::SerializationError(format!("Failed to serialize merged device: {}", e))
     })?;
-    let finding_count = count_rows(
-        conn,
-        "SELECT COUNT(*) FROM scan_findings WHERE scan_id = ?1 AND device_ip = ?2",
-        params![scan_id, finding.ip],
-    )?;
 
     conn.execute(
         "UPDATE scan_devices
-         SET finding_count = ?3, device_json = ?4, updated_at = ?5
+         SET device_json = ?3, updated_at = ?4
          WHERE scan_id = ?1 AND ip = ?2",
         params![
             scan_id,
             finding.ip,
-            finding_count,
             merged_json,
             chrono::Utc::now().timestamp(),
         ],
@@ -959,6 +1100,44 @@ fn merge_finding_into_device_snapshot(
     .map_err(|e| {
         ScanError::ScanStoreError(format!("Failed to update device finding snapshot: {}", e))
     })?;
+    Ok(())
+}
+
+fn refresh_device_counts(
+    conn: &Connection,
+    scan_id: &str,
+    device_ip: &str,
+) -> Result<(), ScanError> {
+    let port_count = count_rows(
+        conn,
+        "SELECT COUNT(*) FROM scan_ports WHERE scan_id = ?1 AND device_ip = ?2",
+        params![scan_id, device_ip],
+    )?;
+    let open_port_count = count_rows(
+        conn,
+        "SELECT COUNT(*) FROM scan_ports WHERE scan_id = ?1 AND device_ip = ?2 AND state = 'open'",
+        params![scan_id, device_ip],
+    )?;
+    let finding_count = count_rows(
+        conn,
+        "SELECT COUNT(*) FROM scan_findings WHERE scan_id = ?1 AND device_ip = ?2",
+        params![scan_id, device_ip],
+    )?;
+
+    conn.execute(
+        "UPDATE scan_devices
+         SET port_count = ?3, open_port_count = ?4, finding_count = ?5, updated_at = ?6
+         WHERE scan_id = ?1 AND ip = ?2",
+        params![
+            scan_id,
+            device_ip,
+            port_count,
+            open_port_count,
+            finding_count,
+            chrono::Utc::now().timestamp(),
+        ],
+    )
+    .map_err(|e| ScanError::ScanStoreError(format!("Failed to refresh device counts: {}", e)))?;
     Ok(())
 }
 
@@ -1003,11 +1182,11 @@ fn to_sql_error(error: ScanError) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
 }
 
-fn device_status_to_str(status: &crate::types::DeviceStatus) -> &'static str {
+fn device_status_to_str(status: &DeviceStatus) -> &'static str {
     match status {
-        crate::types::DeviceStatus::Online => "online",
-        crate::types::DeviceStatus::Offline => "offline",
-        crate::types::DeviceStatus::Unknown => "unknown",
+        DeviceStatus::Online => "online",
+        DeviceStatus::Offline => "offline",
+        DeviceStatus::Unknown => "unknown",
     }
 }
 
@@ -1057,8 +1236,8 @@ mod tests {
         ScanStore::new(dir.to_path_buf())
     }
 
-    fn session(id: &str) -> NewScanSession {
-        NewScanSession {
+    fn session(id: &str) -> ScanSession {
+        ScanSession {
             id: id.to_string(),
             cidr: "192.168.1.0/24".to_string(),
             total_hosts: 256,
@@ -1124,7 +1303,10 @@ mod tests {
         let store = store(tmp.path());
 
         store.initialize().await.expect("initialize");
-        store.begin_session(session("scan-1")).await.expect("begin");
+        store
+            .create_scan_session(session("scan-1"))
+            .await
+            .expect("create");
         store
             .upsert_device("scan-1".to_string(), device("192.168.1.10"))
             .await
@@ -1134,7 +1316,7 @@ mod tests {
             .await
             .expect("progress");
         store
-            .complete_session(
+            .complete_scan_session(
                 "scan-1".to_string(),
                 ScanSessionStatus::Completed,
                 Some(1500),
@@ -1147,8 +1329,6 @@ mod tests {
         assert_eq!(sessions.total, 1);
         assert_eq!(sessions.items[0].status, ScanSessionStatus::Completed);
         assert_eq!(sessions.items[0].scanned_hosts, 10);
-        assert_eq!(sessions.items[0].device_count, 1);
-        assert_eq!(sessions.items[0].finding_count, 1);
 
         let loaded = store
             .get_device("scan-1".to_string(), "192.168.1.10".to_string())
@@ -1156,28 +1336,118 @@ mod tests {
             .expect("get device")
             .expect("device exists");
         assert_eq!(loaded.ip, "192.168.1.10");
+        // Ports/findings are managed relationally, so the standalone path test covers them.
+    }
+
+    #[tokio::test]
+    async fn standalone_port_and_finding_persistence() {
+        let tmp = tempfile::tempdir().expect("create tempdir");
+        let store = store(tmp.path());
+        store
+            .create_scan_session(session("scan-port"))
+            .await
+            .expect("create");
+
+        let mut dev = device("192.168.1.20");
+        dev.ports.clear();
+        dev.findings.clear();
+        store
+            .upsert_device("scan-port".to_string(), dev)
+            .await
+            .expect("upsert device");
+
+        let port = Port {
+            number: 443,
+            protocol: "tcp".to_string(),
+            service: Some("https".to_string()),
+            state: PortState::Open,
+        };
+        store
+            .upsert_port(
+                "scan-port".to_string(),
+                "192.168.1.20".to_string(),
+                port.clone(),
+            )
+            .await
+            .expect("upsert port");
+
+        let finding = Finding {
+            id: "standalone-finding".to_string(),
+            scan_id: String::new(),
+            source: FindingSource::Cve,
+            severity: FindingSeverity::Critical,
+            confidence: FindingConfidence::High,
+            title: "Standalone CVE".to_string(),
+            description: "desc".to_string(),
+            ip: "192.168.1.20".to_string(),
+            port: Some(443),
+            service: Some("https".to_string()),
+            evidence: None,
+            cve: Some(crate::types::CveFindingDetails {
+                cve_id: "CVE-2026-0001".to_string(),
+                affected_software: "soft".to_string(),
+                affected_versions: vec!["<1".to_string()],
+                cvss_score: 9.8,
+            }),
+            timestamp: 2000,
+            category: FindingCategory::Cve,
+            cvss_score: Some(9.8),
+            epss_probability: Some(0.9),
+            remediation: Some("Patch".to_string()),
+        };
+        store
+            .insert_finding("scan-port".to_string(), finding.clone())
+            .await
+            .expect("insert finding");
+
+        let summary_page = store
+            .list_devices_page("scan-port".to_string(), 50, 0)
+            .await
+            .expect("list summaries");
+        assert_eq!(summary_page.total, 1);
+        assert_eq!(summary_page.items[0].port_count, 1);
+        assert_eq!(summary_page.items[0].open_port_count, 1);
+        assert_eq!(summary_page.items[0].finding_count, 1);
+
+        let loaded = store
+            .get_device("scan-port".to_string(), "192.168.1.20".to_string())
+            .await
+            .expect("get device")
+            .expect("device exists");
         assert_eq!(loaded.ports.len(), 1);
+        assert_eq!(loaded.ports[0].number, 443);
         assert_eq!(loaded.findings.len(), 1);
+        assert_eq!(loaded.findings[0].id, "standalone-finding");
+
+        let findings_page = store
+            .list_findings_page("scan-port".to_string(), None, 10, 0)
+            .await
+            .expect("list findings");
+        assert_eq!(findings_page.total, 1);
+        assert!(findings_page.items[0].risk_score > 0.0);
     }
 
     #[tokio::test]
     async fn paging_is_clamped_and_offset_is_respected() {
         let tmp = tempfile::tempdir().expect("create tempdir");
         let store = store(tmp.path());
-        store.begin_session(session("scan-2")).await.expect("begin");
+        store
+            .create_scan_session(session("scan-2"))
+            .await
+            .expect("create");
 
         for idx in 0..3 {
+            let mut dev = device(&format!("192.168.1.{}", idx + 1));
+            dev.ports.clear();
+            dev.findings.clear();
             store
-                .upsert_device(
-                    "scan-2".to_string(),
-                    device(&format!("192.168.1.{}", idx + 1)),
-                )
+                .upsert_device("scan-2".to_string(), dev)
                 .await
                 .expect("upsert");
         }
 
         let page = store
-            .list_devices("scan-2".to_string(), 1000, 1)
+            .list_devices_page("scan-2".to_string(), 1000, 1)
             .await
             .expect("list");
         assert_eq!(page.limit, MAX_PAGE_LIMIT);
@@ -1189,11 +1459,30 @@ mod tests {
     async fn deleting_session_cascades_children() {
         let tmp = tempfile::tempdir().expect("create tempdir");
         let store = store(tmp.path());
-        store.begin_session(session("scan-3")).await.expect("begin");
         store
-            .upsert_device("scan-3".to_string(), device("192.168.1.20"))
+            .create_scan_session(session("scan-3"))
+            .await
+            .expect("create");
+        let mut dev = device("192.168.1.20");
+        dev.ports.clear();
+        dev.findings.clear();
+        store
+            .upsert_device("scan-3".to_string(), dev)
             .await
             .expect("upsert");
+        store
+            .upsert_port(
+                "scan-3".to_string(),
+                "192.168.1.20".to_string(),
+                Port {
+                    number: 22,
+                    protocol: "tcp".to_string(),
+                    service: Some("ssh".to_string()),
+                    state: PortState::Open,
+                },
+            )
+            .await
+            .expect("upsert port");
 
         store
             .delete_session("scan-3".to_string())
@@ -1201,7 +1490,7 @@ mod tests {
             .expect("delete");
 
         let devices = store
-            .list_devices("scan-3".to_string(), 50, 0)
+            .list_devices_page("scan-3".to_string(), 50, 0)
             .await
             .expect("list devices");
         assert_eq!(devices.total, 0);
@@ -1213,13 +1502,23 @@ mod tests {
         let tmp = tempfile::tempdir().expect("create tempdir");
         let store = store(tmp.path());
         store
-            .begin_session(session("scan-findings"))
+            .create_scan_session(session("scan-findings"))
             .await
-            .expect("begin");
+            .expect("create");
+        let mut dev = device("192.168.1.10");
+        dev.ports.clear();
+        dev.findings.clear();
         store
-            .upsert_device("scan-findings".to_string(), device("192.168.1.10"))
+            .upsert_device("scan-findings".to_string(), dev)
             .await
             .expect("upsert");
+        store
+            .insert_finding(
+                "scan-findings".to_string(),
+                device("192.168.1.10").findings[0].clone(),
+            )
+            .await
+            .expect("insert finding");
 
         let page = store
             .list_findings_page("scan-findings".to_string(), None, 10, 0)
@@ -1248,12 +1547,19 @@ mod tests {
         let tmp = tempfile::tempdir().expect("create tempdir");
         let store = store(tmp.path());
         store
-            .begin_session(session("scan-fields"))
+            .create_scan_session(session("scan-fields"))
             .await
-            .expect("begin");
+            .expect("create");
 
         let mut dev = device("192.168.1.50");
-        dev.findings.push(Finding {
+        dev.ports.clear();
+        dev.findings.clear();
+        store
+            .upsert_device("scan-fields".to_string(), dev)
+            .await
+            .expect("upsert");
+
+        let finding = Finding {
             id: "finding-fields".to_string(),
             scan_id: String::new(),
             source: FindingSource::Cve,
@@ -1261,7 +1567,7 @@ mod tests {
             confidence: FindingConfidence::High,
             title: "CVE finding".to_string(),
             description: "desc".to_string(),
-            ip: dev.ip.clone(),
+            ip: "192.168.1.50".to_string(),
             port: Some(443),
             service: Some("https".to_string()),
             evidence: None,
@@ -1276,27 +1582,26 @@ mod tests {
             cvss_score: Some(9.8),
             epss_probability: Some(0.9),
             remediation: Some("Patch".to_string()),
-        });
-
+        };
         store
-            .upsert_device("scan-fields".to_string(), dev)
+            .insert_finding("scan-fields".to_string(), finding.clone())
             .await
-            .expect("upsert");
+            .expect("insert");
 
         let loaded = store
             .get_device("scan-fields".to_string(), "192.168.1.50".to_string())
             .await
             .expect("get device")
             .expect("device exists");
-        let finding = loaded
+        let loaded_finding = loaded
             .findings
             .iter()
             .find(|f| f.id == "finding-fields")
             .expect("finding exists");
-        assert_eq!(finding.category, FindingCategory::Cve);
-        assert_eq!(finding.cvss_score, Some(9.8));
-        assert_eq!(finding.epss_probability, Some(0.9));
-        assert_eq!(finding.remediation.as_deref(), Some("Patch"));
+        assert_eq!(loaded_finding.category, FindingCategory::Cve);
+        assert_eq!(loaded_finding.cvss_score, Some(9.8));
+        assert_eq!(loaded_finding.epss_probability, Some(0.9));
+        assert_eq!(loaded_finding.remediation.as_deref(), Some("Patch"));
 
         let page = store
             .list_findings_page("scan-fields".to_string(), None, 10, 0)

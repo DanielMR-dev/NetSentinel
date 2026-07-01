@@ -1,11 +1,17 @@
 //! History view — scan history table with expandable entries.
+//!
+//! Expanded entries load device summaries paginated from the linked
+//! `ScanStore` session rather than reading embedded device vectors.
 
 use iced::widget::{button, column, container, row, scrollable, text};
 use iced::{Alignment, Length};
 
+use crate::history_adapter::format_port_preview;
 use crate::ui::theme::{self, TEXT, TEXT_MUTED};
 use crate::ui::widgets;
 use crate::ui::{Message, NetSentinelApp};
+
+const HISTORY_DEVICE_PAGE_SIZE: u32 = 50;
 
 /// Render the History page.
 pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
@@ -130,38 +136,7 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
 
             // Expanded detail
             if is_expanded {
-                let mut detail_col = column![].spacing(4);
-
-                detail_col = detail_col.push(
-                    text(format!("Scan ID: {}", entry.scan_id))
-                        .color(TEXT_MUTED)
-                        .size(11),
-                );
-
-                if entry.devices.is_empty() {
-                    detail_col = detail_col
-                        .push(text("No devices in this scan.").color(TEXT_MUTED).size(11));
-                } else {
-                    for device in &entry.devices {
-                        let hostname = device.hostname.as_deref().unwrap_or("-");
-                        let port_count = device.ports.len();
-                        detail_col = detail_col.push(
-                            text(format!(
-                                "  {} ({}) — {} ports — {:?}",
-                                device.ip, hostname, port_count, device.status
-                            ))
-                            .color(TEXT)
-                            .size(11),
-                        );
-                    }
-                }
-
-                let detail_container = container(detail_col)
-                    .padding([8, 16])
-                    .width(Length::Fill)
-                    .style(theme::card_style);
-
-                history_list = history_list.push(detail_container);
+                history_list = history_list.push(view_expanded_detail(app, entry));
             }
         }
     }
@@ -176,6 +151,165 @@ pub fn view(app: &NetSentinelApp) -> iced::Element<'_, Message> {
         .width(Length::Fill)
         .height(Length::Fill)
         .style(theme::app_background)
+        .into()
+}
+
+fn view_expanded_detail<'a>(
+    app: &'a NetSentinelApp,
+    entry: &'a crate::history::ScanHistoryEntry,
+) -> iced::Element<'a, Message> {
+    let mut detail_col = column![].spacing(8);
+
+    detail_col = detail_col.push(
+        row![
+            text(format!("Scan ID: {}", entry.scan_id))
+                .color(TEXT_MUTED)
+                .size(11),
+            iced::widget::horizontal_space().width(Length::Fill),
+        ]
+        .width(Length::Fill),
+    );
+
+    let devices_for_entry =
+        if app.history_devices_scan_id.as_deref() == entry.scan_store_id.as_deref() {
+            &app.history_devices[..]
+        } else {
+            &[]
+        };
+
+    if devices_for_entry.is_empty() {
+        detail_col = detail_col.push(
+            text("No devices loaded for this scan.")
+                .color(TEXT_MUTED)
+                .size(11),
+        );
+    } else {
+        detail_col = detail_col.push(
+            text(format!(
+                "Devices {} of {}",
+                devices_for_entry.len(),
+                app.history_devices_total
+            ))
+            .color(TEXT_MUTED)
+            .size(11),
+        );
+
+        for summary in devices_for_entry {
+            let hostname = summary.hostname.as_deref().unwrap_or("-");
+            let selected = app
+                .history_device_detail
+                .as_ref()
+                .map(|d| d.ip == summary.ip)
+                .unwrap_or(false);
+
+            let row_btn = button(
+                row![text(format!(
+                    "{} ({}) — {} open / {} ports — {} findings",
+                    summary.ip,
+                    hostname,
+                    summary.open_port_count,
+                    summary.port_count,
+                    summary.finding_count
+                ))
+                .color(if selected { theme::INFO } else { TEXT })
+                .size(11)
+                .width(Length::Fill),]
+                .width(Length::Fill),
+            )
+            .padding([4, 8])
+            .style(if selected {
+                theme::active_tab_button
+            } else {
+                theme::secondary_button
+            })
+            .on_press(Message::HistoryDeviceSelected(summary.ip.clone()));
+
+            detail_col = detail_col.push(row_btn);
+        }
+
+        if app.history_devices_total > HISTORY_DEVICE_PAGE_SIZE
+            && devices_for_entry.len() < app.history_devices_total as usize
+        {
+            detail_col = detail_col.push(
+                text(format!(
+                    "Showing first {} of {} devices.",
+                    devices_for_entry.len(),
+                    app.history_devices_total
+                ))
+                .color(TEXT_MUTED)
+                .size(10),
+            );
+        }
+    }
+
+    if let Some(device) = &app.history_device_detail {
+        detail_col = detail_col.push(view_device_detail(device));
+    }
+
+    container(detail_col)
+        .padding([8, 16])
+        .width(Length::Fill)
+        .style(theme::card_style)
+        .into()
+}
+
+fn view_device_detail(device: &crate::types::Device) -> iced::Element<'_, Message> {
+    let mut detail_col = column![].spacing(6);
+
+    detail_col = detail_col.push(
+        row![
+            text("Device Detail").color(TEXT).size(12),
+            iced::widget::horizontal_space().width(Length::Fill),
+        ]
+        .width(Length::Fill),
+    );
+
+    detail_col = detail_col.push(
+        text(format!(
+            "IP: {}    MAC: {}    Status: {:?}",
+            device.ip, device.mac, device.status
+        ))
+        .color(TEXT)
+        .size(11),
+    );
+
+    if let Some(hostname) = &device.hostname {
+        detail_col = detail_col.push(text(format!("Hostname: {}", hostname)).color(TEXT).size(11));
+    }
+    if let Some(vendor) = &device.vendor {
+        detail_col = detail_col.push(text(format!("Vendor: {}", vendor)).color(TEXT).size(11));
+    }
+    if let Some(os) = &device.os {
+        detail_col = detail_col.push(text(format!("OS: {}", os)).color(TEXT).size(11));
+    }
+
+    if !device.ports.is_empty() {
+        detail_col = detail_col.push(text("Open ports:").color(TEXT_MUTED).size(11));
+        for port in device
+            .ports
+            .iter()
+            .filter(|p| p.state == crate::types::PortState::Open)
+        {
+            detail_col = detail_col.push(
+                text(format!("  {}", format_port_preview(port)))
+                    .color(TEXT)
+                    .size(10),
+            );
+        }
+    }
+
+    if !device.findings.is_empty() {
+        detail_col = detail_col.push(
+            text(format!("Findings: {}", device.findings.len()))
+                .color(TEXT_MUTED)
+                .size(11),
+        );
+    }
+
+    container(detail_col)
+        .padding(8)
+        .width(Length::Fill)
+        .style(theme::table_container_style)
         .into()
 }
 

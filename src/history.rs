@@ -1,40 +1,76 @@
 //! Scan history persistence layer.
 //!
-//! Stores completed scan results as a JSON file on disk so users can
-//! review past scans. History is capped at 100 entries; the oldest
-//! entries are evicted when the limit is exceeded.
+//! Stores completed scan summaries as a JSON file on disk so users can
+//! review past scans. History entries no longer embed full device data;
+//! they link to a `ScanStore` session and devices are loaded paginated
+//! on demand. History is capped at 100 entries; the oldest entries are
+//! evicted when the limit is exceeded.
 
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use tracing::{debug, info, warn};
 
 use crate::error::ScanError;
-use crate::types::Device;
 
 /// Maximum number of history entries retained on disk.
 const MAX_HISTORY_ENTRIES: usize = 100;
-const MAX_HISTORY_DEVICE_PREVIEW: usize = 100;
 
 /// A saved scan history entry.
 ///
 /// Serialized with `camelCase` field names to match the frontend
-/// TypeScript interface.
-#[derive(Serialize, Deserialize, Clone, Debug)]
+/// TypeScript interface. Device details are loaded on demand from the
+/// linked `ScanStore` session rather than embedded in this entry.
+#[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanHistoryEntry {
     pub id: String,
     pub scan_id: String,
+    pub scan_store_id: Option<String>,
+    pub cidr: String,
+    pub device_count: u32,
+    pub duration_ms: u64,
+    pub status: String,
+    pub timestamp: i64,
+}
+
+impl<'de> Deserialize<'de> for ScanHistoryEntry {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = LegacyHistoryEntry::deserialize(deserializer)?;
+        Ok(Self {
+            id: raw.id,
+            scan_id: raw.scan_id,
+            scan_store_id: raw.scan_store_id,
+            cidr: raw.cidr,
+            device_count: raw.device_count,
+            duration_ms: raw.duration_ms,
+            status: raw.status,
+            timestamp: raw.timestamp,
+        })
+    }
+}
+
+/// Helper struct that accepts both the current and legacy JSON shapes.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyHistoryEntry {
+    pub id: String,
+    pub scan_id: String,
+    #[serde(default)]
+    pub scan_store_id: Option<String>,
     pub cidr: String,
     pub device_count: u32,
     pub duration_ms: u64,
     pub status: String,
     #[serde(default)]
-    pub scan_store_id: Option<String>,
-    #[serde(default)]
-    pub devices_truncated: bool,
-    pub devices: Vec<Device>,
     pub timestamp: i64,
+    #[serde(default)]
+    _devices: Vec<serde_json::Value>,
+    #[serde(default)]
+    _devices_truncated: bool,
 }
 
 /// Manages reading and writing scan history to a JSON file on disk.
@@ -128,18 +164,13 @@ impl HistoryStore {
     ///
     /// If the store exceeds `MAX_HISTORY_ENTRIES` after insertion, the
     /// oldest entries (by timestamp) are evicted.
-    pub async fn add_entry(&self, mut entry: ScanHistoryEntry) -> Result<(), ScanError> {
+    pub async fn add_entry(&self, entry: ScanHistoryEntry) -> Result<(), ScanError> {
         info!(
             id = %entry.id,
             scan_id = %entry.scan_id,
             cidr = %entry.cidr,
             "Adding scan history entry"
         );
-
-        if entry.devices.len() > MAX_HISTORY_DEVICE_PREVIEW {
-            entry.devices.truncate(MAX_HISTORY_DEVICE_PREVIEW);
-            entry.devices_truncated = true;
-        }
 
         let mut entries = self.load().await?;
         entries.push(entry);
@@ -190,33 +221,17 @@ impl HistoryStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Device, DeviceStatus};
 
     /// Helper to create a test entry with a given id and timestamp.
     fn make_entry(id: &str, timestamp: i64) -> ScanHistoryEntry {
         ScanHistoryEntry {
             id: id.to_string(),
             scan_id: format!("scan-{}", id),
+            scan_store_id: Some(format!("store-{}", id)),
             cidr: "192.168.1.0/24".to_string(),
             device_count: 3,
             duration_ms: 1500,
             status: "completed".to_string(),
-            scan_store_id: None,
-            devices_truncated: false,
-            devices: vec![Device {
-                ip: "192.168.1.1".to_string(),
-                mac: "AA:BB:CC:DD:EE:FF".to_string(),
-                hostname: Some("router.local".to_string()),
-                vendor: Some("TestVendor".to_string()),
-                os: None,
-                status: DeviceStatus::Online,
-                ports: Vec::new(),
-                last_seen: timestamp,
-                banner_results: Vec::new(),
-                active_checks: Vec::new(),
-                web_audits: Vec::new(),
-                findings: Vec::new(),
-            }],
             timestamp,
         }
     }
@@ -253,6 +268,7 @@ mod tests {
         assert_eq!(loaded[0].cidr, "192.168.1.0/24");
         assert_eq!(loaded[0].device_count, 3);
         assert_eq!(loaded[0].duration_ms, 1500);
+        assert_eq!(loaded[0].scan_store_id, Some("store-entry-1".to_string()));
     }
 
     #[tokio::test]
@@ -392,22 +408,25 @@ mod tests {
 
         let entry: ScanHistoryEntry = serde_json::from_str(json).expect("legacy deserialize");
         assert_eq!(entry.scan_store_id, None);
-        assert!(!entry.devices_truncated);
+        assert_eq!(entry.id, "legacy");
     }
 
-    #[tokio::test]
-    async fn test_add_entry_caps_device_preview() {
-        let tmp = tempfile::tempdir().expect("create tempdir");
-        let store = make_store(tmp.path());
-        let mut entry = make_entry("large", 1000);
-        entry.devices = (0..125)
-            .map(|idx| Device::new(format!("192.168.1.{}", idx)))
-            .collect();
+    #[test]
+    fn test_legacy_history_entry_with_embedded_devices_ignores_them() {
+        let json = r#"{
+            "id":"legacy",
+            "scanId":"scan-legacy",
+            "cidr":"192.168.1.0/24",
+            "deviceCount":2,
+            "durationMs":10,
+            "status":"completed",
+            "devices":[{"ip":"192.168.1.1","mac":"","status":"Unknown","ports":[],"last_seen":0,"banner_results":[],"active_checks":[],"web_audits":[],"findings":[]}],
+            "devicesTruncated":false,
+            "timestamp":1000
+        }"#;
 
-        store.add_entry(entry).await.expect("add large entry");
-
-        let loaded = store.load().await.expect("load");
-        assert_eq!(loaded[0].devices.len(), MAX_HISTORY_DEVICE_PREVIEW);
-        assert!(loaded[0].devices_truncated);
+        let entry: ScanHistoryEntry = serde_json::from_str(json).expect("legacy deserialize");
+        assert_eq!(entry.device_count, 2);
+        assert_eq!(entry.scan_store_id, None);
     }
 }

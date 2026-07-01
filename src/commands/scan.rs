@@ -15,7 +15,7 @@ use crate::error::ScanError;
 use crate::events::AppEvent;
 use crate::network::timing::TimingTemplate;
 use crate::network::{cidr, icmp, sanitize};
-use crate::scan_store::{NewScanSession, ScanSessionStatus, ScanStore, StoredScanConfig};
+use crate::scan_store::{ScanSession, ScanSessionStatus, ScanStore, StoredScanConfig};
 use crate::state::SharedScanState;
 use crate::types::{Device, ScanResponse, ScanResultsResponse, ScanType};
 
@@ -119,7 +119,7 @@ pub async fn start_scan(
 
     // Validate CIDR
     let network = cidr::validate_cidr(&cidr)?;
-    let total_hosts = network.iter().count() as u32;
+    let total_hosts = network.size() as u32;
 
     send_log(
         "info",
@@ -180,7 +180,7 @@ pub async fn start_scan(
         return Err(ScanError::Cancelled);
     }
     if let Err(e) = scan_store
-        .begin_session(NewScanSession {
+        .create_scan_session(ScanSession {
             id: scan_id.clone(),
             cidr: cidr.clone(),
             total_hosts,
@@ -206,7 +206,7 @@ pub async fn start_scan(
     }
     if state.is_cancel_requested() || !state.is_running() {
         let _ = scan_store
-            .complete_session(
+            .complete_scan_session(
                 scan_id.clone(),
                 ScanSessionStatus::Cancelled,
                 Some(0),

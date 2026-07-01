@@ -48,25 +48,32 @@ pub async fn stage_persistence_ui(
                         // 1. Add/Update device in shared scan state
                         ctx.state.add_device(device.clone()).await;
 
-                        // 2. Upsert device in scan store
+                        // 2. Upsert device metadata in scan store
                         if let Err(e) = ctx.scan_store.upsert_device(ctx.scan_id.clone(), device.clone()).await {
                             send_persistence_warning(&ctx.event_tx, &format!("Failed to persist device {}: {}", device.ip, e));
                         }
 
-                        // 3. Upsert findings in scan store
+                        // 3. Upsert each port through the standalone API
+                        for port in &device.ports {
+                            if let Err(e) = ctx.scan_store.upsert_port(ctx.scan_id.clone(), device.ip.clone(), port.clone()).await {
+                                send_persistence_warning(&ctx.event_tx, &format!("Failed to persist port {}/{} for {}: {}", port.number, port.protocol, device.ip, e));
+                            }
+                        }
+
+                        // 4. Insert each finding through the standalone API
                         for finding in findings {
-                            if let Err(e) = ctx.scan_store.upsert_finding(ctx.scan_id.clone(), finding.clone()).await {
+                            if let Err(e) = ctx.scan_store.insert_finding(ctx.scan_id.clone(), finding.clone()).await {
                                 send_persistence_warning(&ctx.event_tx, &format!("Failed to persist finding {}: {}", finding.id, e));
                             }
                         }
 
-                        // 4. Update scan progress in SQLite
+                        // 5. Update scan progress in SQLite
                         let current_scanned = ctx.state.get_scanned_count();
                         if let Err(e) = ctx.scan_store.update_progress(ctx.scan_id.clone(), current_scanned, total_hosts).await {
                             send_persistence_warning(&ctx.event_tx, &format!("Failed to persist scan progress: {}", e));
                         }
 
-                        // 5. Emit DeviceFound event to update the UI with fully enriched details
+                        // 6. Emit DeviceFound event to update the UI with fully enriched details
                         let _ = ctx.event_tx.send(AppEvent::DeviceFound(device));
                     }
                     None => {
@@ -109,7 +116,7 @@ pub async fn stage_persistence_ui(
 
     if let Err(e) = ctx
         .scan_store
-        .complete_session(
+        .complete_scan_session(
             ctx.scan_id.clone(),
             final_status.clone(),
             Some(duration_ms),

@@ -66,9 +66,9 @@ pub use scan::{get_scan_results, pause_scan, resume_scan, start_scan, stop_scan}
 
 // Re-export scan store commands
 pub use scan_store::{
-    begin_scan_session, complete_scan_session, delete_scan_session, get_stored_scan_device,
-    initialize_scan_store, list_scan_devices, list_scan_findings_page, list_scan_sessions,
-    load_scan_devices, update_scan_progress, upsert_scan_device, upsert_scan_finding,
+    complete_scan_session, create_scan_session, delete_scan_session, get_stored_scan_device,
+    initialize_scan_store, insert_scan_finding, list_scan_devices, list_scan_findings_page,
+    list_scan_sessions, update_scan_progress, upsert_scan_device, upsert_scan_port,
 };
 
 // Re-export scan store summary types
@@ -85,7 +85,8 @@ pub use settings::{
 
 // Re-export history commands
 pub use history::{
-    clear_scan_history, delete_scan_history_entry, get_scan_history, save_scan_history,
+    clear_scan_history, delete_scan_history_entry, get_history_device_detail,
+    get_history_devices_page, get_scan_history, save_scan_history, save_scan_history_from_session,
 };
 
 // Re-export baseline commands

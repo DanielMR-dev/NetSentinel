@@ -24,6 +24,7 @@ use crate::events::AppEvent;
 use crate::history::ScanHistoryEntry;
 use crate::network::cve::CveMatch;
 use crate::network::privileges::PrivilegeStatus;
+use crate::scan_store::StoredDeviceSummary;
 use crate::settings::SettingsProfile;
 use crate::state::SharedScanState;
 use crate::types::{Device, Finding, FindingSeverity, ScanType};
@@ -169,6 +170,9 @@ pub enum Message {
     HistoryCleared(Result<(), String>),
     ClearHistory,
     HistoryEntryToggled(String),
+    HistoryDevicesLoaded(Result<(String, Vec<StoredDeviceSummary>, u32), String>),
+    HistoryDeviceSelected(String),
+    HistoryDeviceDetailLoaded(Result<Device, String>),
 
     // Baseline
     BaselinesLoaded(Result<Vec<Baseline>, String>),
@@ -275,6 +279,10 @@ pub struct NetSentinelApp {
     // History
     history_entries: Vec<ScanHistoryEntry>,
     expanded_history: Option<String>,
+    history_devices: Vec<StoredDeviceSummary>,
+    history_devices_total: u32,
+    history_devices_scan_id: Option<String>,
+    history_device_detail: Option<Device>,
 
     // Baseline
     baselines: Vec<Baseline>,
@@ -338,6 +346,10 @@ impl NetSentinelApp {
             settings_profiles: Vec::new(),
             history_entries: Vec::new(),
             expanded_history: None,
+            history_devices: Vec::new(),
+            history_devices_total: 0,
+            history_devices_scan_id: None,
+            history_device_detail: None,
             baselines: Vec::new(),
             baseline_diff: None,
             baseline_name: String::new(),
@@ -826,7 +838,7 @@ impl NetSentinelApp {
                 self.is_scanning = false;
                 self.is_paused = false;
                 self.scan_progress = 1.0;
-                self.discovered_devices = devices.clone();
+                self.discovered_devices = devices;
                 self.rebuild_findings_cache();
                 // Clear the receiver synchronously
                 if let Ok(mut guard) = self.event_rx.try_lock() {
@@ -845,8 +857,6 @@ impl NetSentinelApp {
                     device_count,
                     duration_ms,
                     status,
-                    devices_truncated: devices.len() > 100,
-                    devices,
                     timestamp: chrono::Utc::now().timestamp(),
                 };
 
@@ -1170,8 +1180,75 @@ impl NetSentinelApp {
             Message::HistoryEntryToggled(id) => {
                 if self.expanded_history.as_deref() == Some(&id) {
                     self.expanded_history = None;
+                    self.history_devices.clear();
+                    self.history_devices_total = 0;
+                    self.history_devices_scan_id = None;
+                    self.history_device_detail = None;
+                    Task::none()
                 } else {
-                    self.expanded_history = Some(id);
+                    self.expanded_history = Some(id.clone());
+                    self.history_device_detail = None;
+
+                    if let Some(entry) = self.history_entries.iter().find(|e| e.id == id).cloned() {
+                        if let Some(scan_store_id) = entry.scan_store_id {
+                            self.history_devices_scan_id = Some(scan_store_id.clone());
+                            let scan_id_for_task = scan_store_id.clone();
+                            return Task::perform(
+                                async move {
+                                    crate::commands::get_history_devices_page(
+                                        scan_id_for_task.clone(),
+                                        50,
+                                        0,
+                                    )
+                                    .await
+                                    .map(|page| (scan_id_for_task, page.items, page.total))
+                                    .map_err(|e| e.to_string())
+                                },
+                                Message::HistoryDevicesLoaded,
+                            );
+                        }
+                    }
+                    Task::none()
+                }
+            }
+
+            Message::HistoryDevicesLoaded(result) => {
+                match result {
+                    Ok((scan_id, devices, total)) => {
+                        self.history_devices_scan_id = Some(scan_id);
+                        self.history_devices = devices;
+                        self.history_devices_total = total;
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Failed to load history devices: {}", e))
+                    }
+                }
+                Task::none()
+            }
+
+            Message::HistoryDeviceSelected(ip) => {
+                if let Some(scan_id) = self.history_devices_scan_id.clone() {
+                    return Task::perform(
+                        async move {
+                            crate::commands::get_history_device_detail(scan_id, ip)
+                                .await
+                                .map(|device| {
+                                    device.unwrap_or_else(|| Device::new("0.0.0.0".to_string()))
+                                })
+                                .map_err(|e| e.to_string())
+                        },
+                        Message::HistoryDeviceDetailLoaded,
+                    );
+                }
+                Task::none()
+            }
+
+            Message::HistoryDeviceDetailLoaded(result) => {
+                match result {
+                    Ok(device) => self.history_device_detail = Some(device),
+                    Err(e) => {
+                        self.status_message = Some(format!("Failed to load device detail: {}", e))
+                    }
                 }
                 Task::none()
             }

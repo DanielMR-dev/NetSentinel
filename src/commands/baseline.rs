@@ -9,8 +9,12 @@ use crate::baseline::{compute_diff, Baseline, BaselineDiff, BaselineStore};
 use crate::commands::settings::get_config_dir;
 use crate::error::ScanError;
 use crate::network::sanitize;
-use crate::scan_store::ScanStore;
+use crate::scan_store::{ScanStore, StoredDeviceSummary};
 use crate::state::SharedScanState;
+use crate::types::Device;
+
+/// Page size used when materializing a baseline snapshot from `ScanStore`.
+const BASELINE_PAGE_SIZE: u32 = 100;
 
 /// Save a network baseline snapshot.
 pub async fn save_baseline(baseline: Baseline) -> Result<String, ScanError> {
@@ -76,6 +80,43 @@ pub async fn compare_baseline(
     Ok(diff)
 }
 
+/// Materialize the full device list for a scan store session using paginated reads.
+async fn materialize_scan_store_devices(scan_id: &str) -> Result<Vec<Device>, ScanError> {
+    let config_dir = get_config_dir()?;
+    let scan_store = ScanStore::new(config_dir);
+
+    let mut devices = Vec::new();
+    let mut offset = 0u32;
+
+    loop {
+        let page = scan_store
+            .list_devices_page(scan_id.to_string(), BASELINE_PAGE_SIZE, offset)
+            .await?;
+
+        if page.items.is_empty() {
+            break;
+        }
+
+        let page_len = page.items.len() as u32;
+        for summary in page.items {
+            if let Some(device) = scan_store
+                .get_device(scan_id.to_string(), summary.ip.clone())
+                .await?
+            {
+                devices.push(device);
+            }
+        }
+
+        let loaded = offset + page_len;
+        if loaded >= page.total {
+            break;
+        }
+        offset = loaded;
+    }
+
+    Ok(devices)
+}
+
 /// Save a baseline using devices persisted for a scan store session.
 pub async fn save_baseline_from_scan_store(
     scan_id: String,
@@ -87,9 +128,7 @@ pub async fn save_baseline_from_scan_store(
     let _name = sanitize::validate_name(&name)?;
     let _cidr = sanitize::validate_cidr(&scan_cidr)?;
 
-    let config_dir = get_config_dir()?;
-    let scan_store = ScanStore::new(config_dir.clone());
-    let devices = scan_store.load_all_devices(validated_scan_id).await?;
+    let devices = materialize_scan_store_devices(&validated_scan_id).await?;
 
     let baseline = Baseline {
         id: uuid::Uuid::new_v4().to_string(),
@@ -100,6 +139,7 @@ pub async fn save_baseline_from_scan_store(
         created_at: chrono::Utc::now().timestamp(),
     };
 
+    let config_dir = get_config_dir()?;
     let store = BaselineStore::new(config_dir);
     tokio::task::spawn_blocking(move || store.save_blocking(&baseline))
         .await
@@ -122,8 +162,10 @@ pub async fn compare_baseline_with_scan_store(
     .await
     .map_err(|e| ScanError::BaselineError(format!("Baseline load task failed: {}", e)))??;
 
-    let scan_store = ScanStore::new(config_dir);
-    let current_devices = scan_store.load_all_devices(validated_scan_id).await?;
+    let current_devices = materialize_scan_store_devices(&validated_scan_id).await?;
 
     Ok(compute_diff(&baseline, &current_devices))
 }
+
+/// Re-exported page type alias for callers that need to page through scan store devices.
+pub type DeviceSummaryPage = crate::scan_store::Page<StoredDeviceSummary>;
